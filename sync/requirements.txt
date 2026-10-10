@@ -1,0 +1,3 @@
+anthropic>=1.13.0
+garminconnect @ git+https://github.com/schnre/python-garminconnect.git
+curl_cffi>=0.6

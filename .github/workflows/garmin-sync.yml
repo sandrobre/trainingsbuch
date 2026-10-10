@@ -1,0 +1,84 @@
+name: Garmin Sync
+
+on:
+  schedule:
+    # every 3 hours between ~06:00 and ~23:00 Swiss time (cron runs in UTC)
+    - cron: "17 4-21/3 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Wie viele Tage neu laden (leer = automatisch)"
+        required: false
+        default: ""
+      analyze:
+        description: "Danach immer eine Coach-Analyse starten"
+        type: boolean
+        default: false
+
+concurrency:
+  group: data-writes
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATA_REPO: ${{ vars.DATA_REPO || github.repository }}
+      DATA_DIR: ${{ github.workspace }}/store/data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout data repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          token: ${{ secrets.GH_PAT || github.token }}
+          path: store
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sync/requirements.txt
+
+      - run: pip install -r sync/requirements.txt
+
+      - name: Pull data from Garmin Connect
+        id: sync
+        working-directory: sync
+        env:
+          GARMIN_TOKENS: ${{ secrets.GARMIN_TOKENS }}
+          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+          SYNC_DAYS: ${{ inputs.days }}
+        run: python garmin_sync.py
+
+      - name: Store rotated Garmin token
+        if: steps.sync.outputs.tokens_rotated == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Garmin-Token wurde erneuert, aber GH_PAT fehlt – Secret GARMIN_TOKENS kann nicht aktualisiert werden."
+            exit 0
+          fi
+          gh secret set GARMIN_TOKENS -R "$GITHUB_REPOSITORY" < ~/.garminconnect/garmin_tokens.json
+
+      - name: Coach analysis
+        if: steps.sync.outputs.new_activities != '0' || inputs.analyze
+        working-directory: sync
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
+          COACH_EFFORT: ${{ vars.COACH_EFFORT || 'medium' }}
+          TRIGGER: garmin-sync
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "::warning::ANTHROPIC_API_KEY fehlt – Analyse übersprungen."; exit 0; fi
+          python coach.py
+
+      - name: Commit data
+        run: bash .github/scripts/commit-data.sh "Garmin Sync $(date -u +'%Y-%m-%d %H:%M')"
