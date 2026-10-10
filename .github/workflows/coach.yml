@@ -7,10 +7,6 @@ on:
         description: "Auslöser (button, manual-entry, question)"
         required: false
         default: button
-      question:
-        description: "Frage an den Coach (optional)"
-        required: false
-        default: ""
 
 concurrency:
   group: data-writes
@@ -51,7 +47,7 @@ jobs:
           CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
           COACH_EFFORT: ${{ vars.COACH_EFFORT || 'medium' }}
           TRIGGER: ${{ inputs.trigger }}
-          QUESTION: ${{ inputs.question }}
+        # the question is read from data/question.json in the private data repo (inputs are visible in public logs)
         run: python coach.py
 
       - name: Commit data

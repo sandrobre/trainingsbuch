@@ -163,6 +163,11 @@ export function saveProfile(profile) {
   return write('profile', () => profile, 'Profil aktualisiert');
 }
 
+// Questions go into the private data repo – workflow inputs show up in the (public) Actions logs.
+export function saveQuestion(question) {
+  return updateFile('data/question.json', () => ({ question, askedAt: new Date().toISOString() }), 'Frage an den Coach');
+}
+
 export async function dispatch(workflow, inputs = {}) {
   const { branch = 'main' } = getConfig();
   await gh(`${codeRepo()}/actions/workflows/${workflow}/dispatches`, { method: 'POST', body: { ref: branch, inputs } });

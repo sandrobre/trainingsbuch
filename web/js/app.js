@@ -758,12 +758,13 @@ async function poll(check, { interval = 8000, timeout = 8 * 60000 } = {}) {
   return false;
 }
 
-async function runWorkflow({ kind, workflow, inputs, fileKey, question }) {
+async function runWorkflow({ kind, workflow, inputs, fileKey, question, prepare }) {
   if (!requireLive()) return;
   if (state.pending) { toast('Es läuft bereits ein Vorgang – einen Moment bitte.'); return; }
   const stamp = (d) => (fileKey === 'insights' ? d.insights?.generatedAt : d.garmin?.updatedAt);
   const before = stamp(state.data);
   try {
+    if (prepare) await prepare();
     await store.dispatch(workflow, inputs);
   } catch (err) {
     toast(`Start fehlgeschlagen: ${err.message}${err.status === 404 || err.status === 403 ? ' (Token braucht «Actions: write» auf dem App-Repo)' : ''}`, 'error', 7000);
@@ -796,7 +797,10 @@ async function runWorkflow({ kind, workflow, inputs, fileKey, question }) {
   }
 }
 
-const runCoach = (trigger, question = '') => runWorkflow({ kind: 'coach', workflow: 'coach.yml', inputs: { trigger, question }, fileKey: 'insights', question });
+const runCoach = (trigger, question = '') => runWorkflow({
+  kind: 'coach', workflow: 'coach.yml', inputs: { trigger }, fileKey: 'insights', question,
+  prepare: question ? () => store.saveQuestion(question) : null,
+});
 const runSync = () => runWorkflow({ kind: 'sync', workflow: 'garmin-sync.yml', inputs: { days: '', analyze: 'false' }, fileKey: 'garmin' });
 
 // ───────────────────────── rendering & routing ─────────────────────────
