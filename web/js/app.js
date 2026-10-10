@@ -533,7 +533,7 @@ function renderTrends() {
   const days = daily().filter((d) => d.date >= from);
 
   const weekStarts = Array.from({ length: weeks }, (_, i) => addDays(from, i * 7));
-  const weekLabel = (wk) => (weeks > 16 ? (isoWeek(wk) % 4 === 0 ? `KW${isoWeek(wk)}` : '') : `KW${isoWeek(wk)}`);
+  const weekLabel = (wk) => `KW${isoWeek(wk)}`;
   const volumeCols = weekStarts.map((wk) => {
     const wa = acts.filter((a) => a.date >= wk && a.date < addDays(wk, 7));
     const per = minutesBySport(wa);
@@ -573,8 +573,8 @@ function renderTrends() {
   };
 
   const sleepDays = days.slice(-Math.min(days.length, weeks <= 4 ? 28 : 42)).filter((d) => d.sleepH);
-  const sleepCols = sleepDays.map((d, i) => ({
-    label: i % 7 === 0 ? fmtDate(d.date, { day: 'numeric', month: 'numeric' }) : '',
+  const sleepCols = sleepDays.map((d) => ({
+    label: fmtDate(d.date, { day: 'numeric', month: 'numeric' }),
     tip: `<b>${esc(fmtDate(d.date))}</b><br>${fmtNum(d.sleepH, 1)} h Schlaf${d.sleepScore ? `<br>Score ${d.sleepScore}` : ''}${d.deepH ? `<br>Tief ${fmtNum(d.deepH, 1)} h · REM ${fmtNum(d.remH, 1)} h` : ''}`,
     segments: [{ type: 'sleep', value: d.sleepH, color: 'var(--series-1)' }],
   }));
@@ -646,12 +646,12 @@ function renderSettings() {
         <p class="muted small">Deine Daten liegen als JSON-Dateien in einem (privaten) GitHub-Repository. Der Token bleibt nur auf diesem Gerät gespeichert. Anleitung im README.</p>
         <form id="cfg-form" class="form">
           <div class="row">
-            <label class="field"><span>GitHub-Benutzer</span><input name="owner" value="${esc(cfg.owner || '')}" placeholder="schnre" required autocomplete="username"></label>
+            <label class="field"><span>GitHub-Benutzer</span><input name="owner" value="${esc(cfg.owner || store.detectedRepo().owner || '')}" placeholder="schnre" required autocomplete="username"></label>
             <label class="field"><span>Branch</span><input name="branch" value="${esc(cfg.branch || 'main')}"></label>
           </div>
           <div class="row">
             <label class="field"><span>Daten-Repo</span><input name="dataRepo" value="${esc(cfg.dataRepo || '')}" placeholder="healthy_football_data" required></label>
-            <label class="field"><span>App-Repo (Workflows)</span><input name="codeRepo" value="${esc(cfg.codeRepo || '')}" placeholder="Healthy_Football"></label>
+            <label class="field"><span>App-Repo (Workflows)</span><input name="codeRepo" value="${esc(live ? store.appRepo() : (cfg.codeRepo || store.detectedRepo().codeRepo || ''))}" placeholder="Healthy_Football"></label>
           </div>
           <label class="field"><span>Fine-grained Personal Access Token</span><input name="token" type="password" value="${esc(cfg.token || '')}" placeholder="github_pat_…" autocomplete="off"></label>
           <div class="form-actions">
@@ -713,13 +713,14 @@ async function submitConfig(form) {
   const fd = Object.fromEntries(new FormData(form));
   const cfg = {
     owner: fd.owner.trim(), dataRepo: fd.dataRepo.trim(),
-    codeRepo: fd.codeRepo.trim() || fd.dataRepo.trim(), branch: fd.branch.trim() || 'main', token: fd.token.trim(),
+    codeRepo: fd.codeRepo.trim() || store.detectedRepo().codeRepo || fd.dataRepo.trim(), branch: fd.branch.trim() || 'main', token: fd.token.trim(),
   };
   store.saveConfig(cfg);
   try {
     const info = await store.testConnection();
-    if (!info.canWrite) toast('Verbunden, aber der Token hat keine Schreibrechte auf das Daten-Repo.', 'error', 6000);
-    else toast(`Verbunden mit ${info.dataRepo}${info.private ? ' (privat)' : ''}`);
+    if (!info.canWrite) toast('Verbunden, aber der Token hat keine Schreibrechte auf das Daten-Repo («Contents: Read and write»).', 'error', 8000);
+    else if (!info.workflows) toast(`Daten OK, aber kein Zugriff auf die Workflows in ${info.codeRepo}. Der Token braucht auch dieses Repo mit «Actions: Read and write».`, 'error', 10000);
+    else toast(`Verbunden mit ${info.dataRepo}${info.private ? ' (privat)' : ''} · Workflows in ${info.codeRepo} erreichbar`);
     await reload();
   } catch (err) {
     toast(`Verbindung fehlgeschlagen: ${err.message}`, 'error', 6000);
@@ -767,7 +768,10 @@ async function runWorkflow({ kind, workflow, inputs, fileKey, question, prepare 
     if (prepare) await prepare();
     await store.dispatch(workflow, inputs);
   } catch (err) {
-    toast(`Start fehlgeschlagen: ${err.message}${err.status === 404 || err.status === 403 ? ' (Token braucht «Actions: write» auf dem App-Repo)' : ''}`, 'error', 7000);
+    const repo = `${store.getConfig().owner}/${store.appRepo()}`;
+    toast(err.status === 404 || err.status === 403
+      ? `Workflow in ${repo} nicht erreichbar. Prüfe in den Einstellungen das App-Repo und ob der Token Zugriff auf ${repo} mit «Actions: Read and write» hat.`
+      : `Start fehlgeschlagen: ${err.message}`, 'error', 10000);
     return;
   }
   const since = Date.now();
