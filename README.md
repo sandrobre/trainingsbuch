@@ -4,7 +4,7 @@ Persönliches Trainings-Dashboard für **Laufen und Fussball**. Die App läuft a
 
 - übernimmt **Läufe, Trainings und Gesundheitsdaten automatisch von Garmin Connect** (alle 3 Stunden),
 - lässt dich **zusätzliche Trainings erfassen** (Fussballtraining, Matches, Kraft …) und Garmin-Aktivitäten ergänzen (RPE, Gefühl, Notizen, Sportart),
-- lässt **Claude** alles analysieren: Tagesform, Belastung, Tipps fürs Laufen und für Fussball-Fitness, einen 7-Tage-Plan und Antworten auf deine Fragen.
+- lässt **Claude** auf Knopfdruck alles analysieren: Tagesform, Belastung, Tipps fürs Laufen und für Fussball-Fitness, einen 7-Tage-Plan und Antworten auf deine Fragen.
 
 Ohne Einrichtung startet die App im **Demo-Modus** mit Beispieldaten.
 
@@ -79,6 +79,7 @@ Garmin erneuert das Token regelmässig. Der Sync-Workflow schreibt das neue Toke
 | `DATA_REPO` | Variable | `schnre/healthy_football_data` |
 | `CLAUDE_MODEL` | Variable (optional) | Standard `claude-opus-5-5` |
 | `COACH_EFFORT` | Variable (optional) | `low` · `medium` (Standard) · `high` |
+| `AUTO_ANALYZE` | Variable (optional) | `true` = nach jedem Sync mit neuen Aktivitäten automatisch analysieren. Standard: aus, Analyse nur auf Knopfdruck. |
 | `GARMIN_EMAIL` / `GARMIN_PASSWORD` | Secret (optional) | Fallback-Login, funktioniert nur ohne MFA |
 
 **`GH_PAT` für die Workflows**: [Fine-grained Token erstellen](https://github.com/settings/personal-access-tokens/new)
@@ -97,7 +98,7 @@ Das Token bleibt im `localStorage` dieses Browsers und geht nur an `api.github.c
 
 ### 6. Erster Sync
 
-**Actions → Garmin Sync → Run workflow**, mit `days = 90` und angehaktem *Danach immer eine Coach-Analyse starten*. Danach läuft der Sync automatisch alle 3 Stunden (06–23 Uhr). Neue Aktivitäten lösen automatisch eine Coach-Analyse aus.
+**Actions → Garmin Sync → Run workflow**, mit `days = 90` und angehaktem *Danach eine Coach-Analyse starten*. Danach läuft der Sync automatisch alle 3 Stunden (06–23 Uhr). Claude analysiert nur, wenn du in der App **«Neu analysieren»** drückst oder eine Frage stellst.
 
 ### 7. Aufs Handy
 
@@ -108,7 +109,7 @@ Am Desktop: **Einstellungen → Setup-Link kopieren**, den Link an dich selbst s
 ## Kosten
 
 - **GitHub**: Pages und Actions sind für öffentliche Repos kostenlos. Die Workflows laufen im App-Repo, das private Daten-Repo wird nur ausgecheckt.
-- **Claude API**: Eine Analyse schickt rund 8–10k Tokens rein und bekommt 2–4k zurück. Das sind mit Claude Opus 5.5 grob **0.10–0.20 USD pro Analyse**. Bei 1–3 Analysen pro Tag sind das etwa 3–15 USD pro Monat. Günstiger wird es mit `COACH_EFFORT=low` oder `CLAUDE_MODEL=claude-sonnet-5-5`.
+- **Claude API**: Eine Analyse schickt rund 8–10k Tokens rein und bekommt 2–4k zurück. Das sind mit Claude Opus 5.5 grob **0.10–0.20 USD pro Analyse**. Da Analysen nur auf Knopfdruck laufen, zahlst du nur, was du auslöst. Eine Analyse pro Tag kostet etwa 3–6 USD pro Monat. Günstiger wird es mit `COACH_EFFORT=low` oder `CLAUDE_MODEL=claude-sonnet-5-5`.
 
 ## Gut zu wissen
 

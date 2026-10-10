@@ -462,7 +462,7 @@ async function submitActivity(form) {
     sheet.close();
     toast(mode === 'new' ? 'Training gespeichert' : 'Änderungen gespeichert');
     await reload();
-    if (store.isLive() && store.getPrefs().autoAnalyze) runCoach('manual-entry');
+    if (store.isLive() && store.getPrefs().analyzeAfterEntry) runCoach('manual-entry');
   } catch (err) {
     toast(`Speichern fehlgeschlagen: ${err.message}`, 'error');
     submit.disabled = false;
@@ -489,7 +489,7 @@ function renderCoach() {
 
   if (!an) {
     return `${head}${demoBanner()}${pendingBanner()}
-      ${emptyState('Noch keine Analyse', 'Der Coach analysiert automatisch nach jedem Garmin-Sync mit neuen Aktivitäten und nach jedem manuell erfassten Training.', '<button class="btn btn-primary" data-action="analyze">Jetzt analysieren</button>')}
+      ${emptyState('Noch keine Analyse', 'Drück auf «Jetzt analysieren» – Claude wertet dann alle Trainings und Gesundheitsdaten aus. Analysen laufen nur auf Knopfdruck.', '<button class="btn btn-primary" data-action="analyze">Jetzt analysieren</button>')}
       ${ask}`;
   }
 
@@ -686,8 +686,8 @@ function renderSettings() {
 
       <article class="card">
         <header class="card-head"><h2>${icon('sparkles', 18)} Automatisierung</h2></header>
-        <label class="switch"><input type="checkbox" data-pref="autoAnalyze" ${prefs.autoAnalyze ? 'checked' : ''}><span></span>Nach jedem erfassten Training automatisch analysieren</label>
-        <p class="muted small">Garmin wird automatisch alle 3 Stunden synchronisiert. Neue Aktivitäten lösen eine Coach-Analyse aus.</p>
+        <label class="switch"><input type="checkbox" data-pref="analyzeAfterEntry" ${prefs.analyzeAfterEntry ? 'checked' : ''}><span></span>Nach jedem erfassten Training automatisch analysieren (kostet API-Guthaben)</label>
+        <p class="muted small">Garmin wird automatisch alle 3 Stunden synchronisiert – das ist gratis. Claude analysiert nur, wenn du «Neu analysieren» drückst oder eine Frage stellst (ca. 0.10–0.20 USD pro Analyse).</p>
         <p class="muted small">Letzter Garmin-Sync: <strong>${esc(relTime(state.data?.garmin?.updatedAt))}</strong> · Letzte Analyse: <strong>${esc(relTime(state.data?.insights?.generatedAt))}</strong></p>
         <div class="form-actions">
           <button class="btn" data-action="sync">${icon('refresh', 16)}Garmin jetzt synchronisieren</button>

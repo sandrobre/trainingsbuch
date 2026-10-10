@@ -11,7 +11,7 @@ on:
         required: false
         default: ""
       analyze:
-        description: "Danach immer eine Coach-Analyse starten"
+        description: "Danach eine Coach-Analyse starten (kostet API-Guthaben)"
         type: boolean
         default: false
 
@@ -69,7 +69,8 @@ jobs:
           gh secret set GARMIN_TOKENS -R "$GITHUB_REPOSITORY" < ~/.garminconnect/garmin_tokens.json
 
       - name: Coach analysis
-        if: steps.sync.outputs.new_activities != '0' || inputs.analyze
+        # Claude only runs on request – or after new activities if the variable AUTO_ANALYZE is 'true'
+        if: inputs.analyze || (vars.AUTO_ANALYZE == 'true' && steps.sync.outputs.new_activities != '0')
         working-directory: sync
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
