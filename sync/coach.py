@@ -3,7 +3,8 @@
 Environment:
     ANTHROPIC_API_KEY   required
     TRIGGER             why the analysis runs (garmin-sync, manual-entry, button, question)
-    QUESTION            optional question from the app's coach chat
+    QUESTION            optional question (the app stores it in data/question.json instead,
+                        because workflow inputs are visible in public Actions logs)
     CLAUDE_MODEL        default claude-opus-5-5
     COACH_EFFORT        low | medium | high | xhigh | max (default medium)
     DRY_RUN=1           print the prompt instead of calling the API
@@ -213,7 +214,8 @@ def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, ques
 
 def main() -> None:
     trigger = os.environ.get("TRIGGER") or "manual"
-    question = (os.environ.get("QUESTION") or "").strip()[:2000]
+    pending = read_json("question.json", {})
+    question = (os.environ.get("QUESTION") or pending.get("question") or "").strip()[:2000]
 
     garmin = read_json("garmin.json", {})
     manual = read_json("manual.json", {})
@@ -261,6 +263,8 @@ def main() -> None:
     if question:
         qa = [{"question": question, "answer": analysis.get("answer", ""), "at": now_iso()}] + qa
 
+    if pending.get("question"):
+        write_json("question.json", {})  # answered – clear it
     write_json("insights.json", {
         "generatedAt": now_iso(),
         "model": response.model,

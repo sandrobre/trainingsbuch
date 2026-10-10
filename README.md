@@ -28,6 +28,7 @@ Es gibt keinen eigenen Server: GitHub übernimmt Hosting, Speicher und Rechenzei
 | `data/garmin.json` | Workflow *Garmin Sync* | Aktivitäten, Tageswerte (Ruhepuls, HRV, Schlaf, Body Battery, Stress, Schritte), VO₂max, Readiness, Wettkampfprognosen |
 | `data/manual.json` | App | Manuell erfasste Trainings und Ergänzungen zu Garmin-Aktivitäten |
 | `data/profile.json` | App | Dein Profil (Position, Ziele, Verletzungen, feste Termine) |
+| `data/question.json` | App (der Coach leert sie nach der Antwort) | Offene Frage an den Coach |
 | `data/insights.json` | Workflow *Coach Analyse* | Analyse, Tipps, 7-Tage-Plan, Fragen & Antworten |
 
 Die App schreibt nur `manual.json` und `profile.json`, die Workflows nur `garmin.json` und `insights.json`. Deshalb gibt es keine Schreibkonflikte.
@@ -109,6 +110,7 @@ Am Desktop: **Einstellungen → Setup-Link kopieren**, den Link an dich selbst s
 
 ## Gut zu wissen
 
+- **Öffentliches App-Repo**: Code, Workflows und Actions-Logs sind öffentlich, deine Daten nicht. Die Workflows schreiben keine Gesundheitsdaten in die Logs. Fragen an den Coach gehen deshalb über `data/question.json` im privaten Daten-Repo und nicht über die (öffentlich sichtbaren) Workflow-Eingaben. Wenn du eigene Workflow-Schritte ergänzt: keine Daten mit `print`/`echo` ausgeben.
 - **Geplante Workflows** deaktiviert GitHub nach 60 Tagen ohne Commit im App-Repo. Du bekommst dann eine E-Mail und kannst den Workflow mit einem Klick wieder aktivieren.
 - **Fussball mit der Uhr aufgezeichnet?** Garmin speichert das je nach Gerät als *Fussball*, *Cardio* oder *Andere*. Öffne die Aktivität in der App, klicke auf *Ergänzen* und stelle die Sportart auf Fussball. Das gilt dann auch für die Analyse.
 - **Analyse-Logik**: `sync/coach.py` berechnet Kennzahlen (Session-RPE-Belastung, ACWR, Wochenumfänge, Pace-Entwicklung, Gesundheits-Trends) und schickt sie mit den Aktivitäten der letzten 42 Tage an Claude. Die Antwort kommt als strukturiertes JSON (`output_config.format`).
