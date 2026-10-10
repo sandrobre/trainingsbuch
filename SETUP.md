@@ -4,7 +4,7 @@ Mit dieser Anleitung richtest du deine eigene Kopie von **Healthy Football** ein
 
 - eine App unter `https://<dein-github-name>.github.io/Healthy_Football/`, im Browser und auf dem Handy,
 - ein **privates** Repo mit deinen Daten,
-- automatischen Garmin-Sync alle 3 Stunden und Coach-Analysen mit Claude.
+- automatischen Garmin-Sync alle 3 Stunden (gratis) und Coach-Analysen mit Claude **auf Knopfdruck**.
 
 Dauer: ca. 30 Minuten. Kosten: GitHub gratis, Claude API ca. 0.10–0.20 USD pro Analyse (Prepaid-Guthaben).
 
@@ -259,7 +259,7 @@ gh run watch -R <USER>/Healthy_Football $(gh run list -R <USER>/Healthy_Football
 2. Rechts **Run workflow**:
    - Branch: `main`
    - Wie viele Tage neu laden: `90`
-   - Danach immer eine Coach-Analyse starten: ✅
+   - Danach eine Coach-Analyse starten: ✅ (einmalig für die erste Analyse)
 3. **Run workflow** klicken. Der Lauf erscheint nach ein paar Sekunden und dauert 3–5 Minuten.
 
 **Prüfen:** Der Lauf hat einen grünen Haken ✅, und im Repo `healthy_football_data` gibt es den Ordner `data/` mit `garmin.json` und `insights.json`.
@@ -307,8 +307,9 @@ Mit **Speichern & testen** prüfst du die Verbindung. Erwartet: «Verbunden mit 
 
 ## Fertig – was jetzt automatisch läuft
 
-- **Alle 3 Stunden** (ca. 06–23 Uhr) holt *Garmin Sync* neue Aktivitäten und Gesundheitswerte. Bei neuen Aktivitäten startet automatisch eine Coach-Analyse.
-- **Nach jedem erfassten Training** in der App startet eine Analyse (abschaltbar in den Einstellungen).
+- **Alle 3 Stunden** (ca. 06–23 Uhr) holt *Garmin Sync* neue Aktivitäten und Gesundheitswerte. Das kostet nichts.
+- **Claude analysiert nur auf Knopfdruck:** in der App **Coach → «Neu analysieren»** oder mit einer Frage. Jede Analyse kostet ca. 0.10–0.20 USD.
+- Optional automatisch: In der App unter Einstellungen «Nach jedem erfassten Training automatisch analysieren» einschalten, und/oder im Repo die Variable `AUTO_ANALYZE` = `true` setzen (dann analysiert jeder Sync mit neuen Aktivitäten).
 - Fragen an den Coach stellst du in der App unter **Coach → Frag deinen Coach**. Die Antwort kommt nach 1–2 Minuten.
 
 ---
