@@ -285,7 +285,10 @@ p { text-wrap: pretty; }
 .status.bad { color: var(--bad); }
 
 /* ───────── charts ───────── */
-.chart { --h: 170px; }
+.chart { --h: 170px; container-type: inline-size; }
+.x-labels .skip-wide { visibility: hidden; }
+.x-labels:not(.positioned) span:last-child { text-align: right; }  /* newest label must not run past the card edge */
+@container (max-width: 520px) { .x-labels .skip-narrow { visibility: hidden; } }
 .chart .plot { position: relative; height: var(--h); margin-left: 40px; border-bottom: 1px solid var(--border); }
 .gridline { position: absolute; left: 0; right: 0; height: 0; border-top: 1px dashed var(--grid); pointer-events: none; }
 .gridline em { position: absolute; right: calc(100% + 8px); top: -.65em; font: 500 11px/1.2 var(--mono); font-style: normal; color: var(--ink-3); white-space: nowrap; }

@@ -67,7 +67,20 @@ const b64decode = (b64) => new TextDecoder().decode(Uint8Array.from(atob(b64.rep
 
 const repoPath = (repo) => `/repos/${getConfig().owner}/${repo}`;
 const dataRepo = () => repoPath(getConfig().dataRepo);
-const codeRepo = () => repoPath(getConfig().codeRepo || getConfig().dataRepo);
+/** On GitHub Pages (owner.github.io/Repo/) the app repo is known from the URL. */
+export function detectedRepo() {
+  const host = location.hostname.match(/^([^.]+)\.github\.io$/i);
+  if (!host) return {};
+  const repo = location.pathname.split('/').filter(Boolean)[0];
+  return { owner: host[1], codeRepo: repo || `${host[1]}.github.io` };
+}
+/** Repo holding the workflows. An empty field or one equal to the data repo falls back to the Pages repo. */
+export function appRepo() {
+  const cfg = getConfig();
+  if (cfg.codeRepo && cfg.codeRepo !== cfg.dataRepo) return cfg.codeRepo;
+  return detectedRepo().codeRepo || cfg.codeRepo || cfg.dataRepo;
+}
+const codeRepo = () => repoPath(appRepo());
 
 async function readFile(path) {
   try {
@@ -181,10 +194,14 @@ export async function latestRun(workflow) {
 export async function testConnection() {
   const cfg = getConfig();
   const data = await (await gh(dataRepo())).json();
-  const result = { dataRepo: data.full_name, private: data.private, canWrite: Boolean(data.permissions?.push) };
-  if (cfg.codeRepo && cfg.codeRepo !== cfg.dataRepo) {
-    const code = await (await gh(codeRepo())).json();
-    result.codeRepo = code.full_name;
+  const result = { dataRepo: data.full_name, private: data.private, canWrite: Boolean(data.permissions?.push), codeRepo: `${cfg.owner}/${appRepo()}` };
+  // GitHub answers 404 (not 403) when the token may not see a repo or its workflows
+  try {
+    await gh(`${codeRepo()}/actions/workflows/coach.yml`);
+    result.workflows = true;
+  } catch (err) {
+    if (err.status !== 404 && err.status !== 403) throw err;
+    result.workflows = false;
   }
   return result;
 }

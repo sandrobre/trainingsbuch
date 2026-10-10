@@ -16,6 +16,12 @@ export function bars(cols, { height = 170, unit = '', color } = {}) {
   const ticks = [];
   for (let t = step; t <= max; t += step) ticks.push(t);
 
+  // Thin out x labels (counted from the newest bar): at most ~14 on wide charts, ~7 on phones.
+  const n = cols.length;
+  const strideWide = Math.ceil(n / 14);
+  const strideNarrow = Math.ceil(n / 7);
+  const labelClass = (i) => [(n - 1 - i) % strideWide ? 'skip-wide' : '', (n - 1 - i) % strideNarrow ? 'skip-narrow' : ''].join(' ').trim();
+
   return `<div class="chart bars" style="--h:${height}px">
     <div class="plot">
       ${ticks.map((t) => `<span class="gridline" style="bottom:${(t / max) * 100}%"><em>${t}${unit && t === max ? ` ${unit}` : ''}</em></span>`).join('')}
@@ -28,7 +34,7 @@ export function bars(cols, { height = 170, unit = '', color } = {}) {
           </div>`).join('')}
       </div>
     </div>
-    <div class="x-labels">${cols.map((c) => `<span>${esc(c.label)}</span>`).join('')}</div>
+    <div class="x-labels">${cols.map((c, i) => `<span class="${labelClass(i)}">${esc(c.label)}</span>`).join('')}</div>
   </div>`;
 }
 
