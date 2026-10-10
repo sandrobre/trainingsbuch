@@ -1,0 +1,60 @@
+name: Coach Analyse
+
+on:
+  workflow_dispatch:
+    inputs:
+      trigger:
+        description: "Auslöser (button, manual-entry, question)"
+        required: false
+        default: button
+      question:
+        description: "Frage an den Coach (optional)"
+        required: false
+        default: ""
+
+concurrency:
+  group: data-writes
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  analyse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATA_REPO: ${{ vars.DATA_REPO || github.repository }}
+      DATA_DIR: ${{ github.workspace }}/store/data
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout data repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          token: ${{ secrets.GH_PAT || github.token }}
+          path: store
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sync/requirements.txt
+
+      - run: pip install -r sync/requirements.txt
+
+      - name: Ask Claude
+        working-directory: sync
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
+          COACH_EFFORT: ${{ vars.COACH_EFFORT || 'medium' }}
+          TRIGGER: ${{ inputs.trigger }}
+          QUESTION: ${{ inputs.question }}
+        run: python coach.py
+
+      - name: Commit data
+        env:
+          TRIGGER: ${{ inputs.trigger }}
+        run: bash .github/scripts/commit-data.sh "Coach-Analyse ($TRIGGER)"
