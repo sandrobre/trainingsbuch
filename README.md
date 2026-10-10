@@ -8,6 +8,8 @@ Persönliches Trainings-Dashboard für **Laufen und Fussball**. Die App läuft a
 
 Ohne Einrichtung startet die App im **Demo-Modus** mit Beispieldaten.
 
+> **Selbst nutzen?** Folge der Schritt-für-Schritt-Anleitung in [SETUP.md](SETUP.md). Mit Claude Code reicht: *«Lies SETUP.md und richte mir Healthy Football ein.»*
+
 ## Architektur
 
 Es gibt keinen eigenen Server: GitHub übernimmt Hosting, Speicher und Rechenzeit.
