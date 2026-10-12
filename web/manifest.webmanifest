@@ -1,12 +1,12 @@
 {
-  "name": "Healthy Football",
-  "short_name": "HealthyFB",
-  "description": "Trainings-Dashboard für Laufen und Fussball mit Garmin-Sync und KI-Coach",
+  "name": "Trainingsbuch",
+  "short_name": "Training",
+  "description": "Trainingsbuch für Laufen, Kraft und Schwimmen mit Garmin-Sync und KI-Coach",
   "lang": "de-CH",
   "start_url": "./#/heute",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0c0e11",
+  "background_color": "#e8492a",
   "theme_color": "#0c0e11",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },

@@ -6,13 +6,13 @@
   <!-- Only our own scripts may run, and data may only go to the GitHub API (protects the token in localStorage). -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self' https://api.github.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="referrer" content="no-referrer">
-  <meta name="description" content="Persönliches Trainings-Dashboard für Laufen und Fussball – mit Garmin-Sync und KI-Coach.">
-  <meta name="theme-color" content="#f5f6f2" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Persönliches Trainingsbuch für Laufen, Kraft und Schwimmen – mit Garmin-Sync und KI-Coach.">
+  <meta name="theme-color" content="#fbf6f2" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0c0e11" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Healthy Football">
-  <title>Healthy Football</title>
+  <meta name="apple-mobile-web-app-title" content="Trainingsbuch">
+  <title>Trainingsbuch</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon-180.png">
@@ -25,14 +25,14 @@
 <body>
   <div class="app">
     <aside class="sidebar">
-      <a class="brand" href="#/heute"><span class="brand-mark">⚽</span><span>Healthy<b>Football</b></span></a>
+      <a class="brand" href="#/heute"><img class="brand-mark" src="icon.svg" alt=""><span>Trainings<b>buch</b></span></a>
       <nav id="side-nav" class="side-nav" aria-label="Hauptnavigation"></nav>
       <button id="side-add" class="btn btn-primary btn-block" data-action="add"></button>
       <p id="side-status" class="side-status"></p>
     </aside>
 
     <header class="topbar">
-      <a class="brand-mark sm" href="#/heute" aria-label="Start">⚽</a>
+      <a class="brand-mark sm" href="#/heute" aria-label="Start"><img src="icon.svg" alt=""></a>
       <span id="topbar-title" class="topbar-title"></span>
       <div id="topbar-actions" class="topbar-actions"></div>
     </header>
