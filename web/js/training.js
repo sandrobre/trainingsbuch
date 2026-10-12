@@ -86,6 +86,7 @@ export function normalizeProfile(raw = {}) {
   p.goals = { main: '', secondary: [], phase: '', targets: [], notes: '', ...p.goals };
   p.nutrition = { enabled: false, diet: 'Alles', intolerances: '', ...(p.nutrition || {}) };
   p.customExercises ??= [];
+  p.templates ??= [];
   return p;
 }
 
@@ -135,14 +136,17 @@ export function setRow(set = {}, unit) {
   </div>`;
 }
 
-export function exerciseBlock(exercise, last) {
+export function exerciseBlock(exercise, last, plan) {
   const sets = exercise.sets?.length ? exercise.sets : [{}];
-  return `<div class="ex-block" data-ex-id="${esc(exercise.id)}" data-ex-name="${esc(exercise.name)}" data-ex-group="${esc(exercise.group || 'Eigene')}" data-ex-unit="${esc(exercise.unit || '')}">
+  const p = plan ? ` data-plan="${esc(JSON.stringify({ target: plan.target, sugg: plan.sugg }))}" data-decision="${esc(plan.decision || '')}"` : '';
+  return `<div class="ex-block" data-ex-id="${esc(exercise.id)}" data-ex-name="${esc(exercise.name)}" data-ex-group="${esc(exercise.group || 'Eigene')}" data-ex-unit="${esc(exercise.unit || '')}"${p}>
     <header>
       <div><strong>${esc(exercise.name)}</strong>
-      <span class="muted small">${last ? `Letztes Mal (${esc(fmtDate(last.date, { day: 'numeric', month: 'short' }))}): ${esc(fmtSets(last.sets, exercise.unit))}` : esc(exercise.group || '')}</span></div>
+      ${plan ? `<span class="muted small">${esc(targetText(plan.target, exercise.unit))}</span>` : ''}
+      <span class="muted small">${last ? `${last.eval ? 'Testsatz' : 'Letztes Mal'} (${esc(fmtDate(last.date, { day: 'numeric', month: 'short' }))}): ${esc(fmtSets(last.sets, exercise.unit))}` : esc(exercise.group || '')}</span></div>
       <button type="button" class="icon-btn sm" data-action="ex-remove" aria-label="Übung entfernen">${icon('trash', 16)}</button>
     </header>
+    ${plan ? suggBox(plan, exercise.unit) : ''}
     <div class="sets">${sets.map((s) => setRow(s, exercise.unit)).join('')}</div>
     <div class="ex-actions">
       <button type="button" class="btn btn-sm" data-action="set-add">${icon('plus', 14)}Satz</button>
@@ -159,6 +163,7 @@ export function readExercises(form) {
     name: b.dataset.exName,
     group: b.dataset.exGroup,
     ...(b.dataset.exUnit ? { unit: b.dataset.exUnit } : {}),
+    ...(b.dataset.plan ? { progression: { sugg: JSON.parse(b.dataset.plan).sugg?.type, decision: b.dataset.decision || undefined } } : {}),
     sets: [...b.querySelectorAll('.set-row')]
       .map((r) => ({ kg: num(r.querySelector('[data-f=kg]').value), reps: num(r.querySelector('[data-f=reps]').value) }))
       .filter((s) => s.kg || s.reps)
@@ -167,3 +172,146 @@ export function readExercises(form) {
 }
 
 export const slug = (name) => name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+
+// ───────────────────────── templates & progression ─────────────────────────
+/** Default weight step: dumbbells 2 kg, bodyweight 0, timed exercises 10 s, everything else 2.5 kg. */
+export function defaultInc(ex) {
+  if (!ex) return 2.5;
+  if (ex.unit === 's') return /seit/i.test(ex.name) ? 5 : 10;
+  if (ex.bw) return 0;
+  if (/kurzhantel|^db_|einbeinig|split/i.test(`${ex.id} ${ex.name}`)) return 2;
+  return 2.5;
+}
+export const targetText = (t, unit) => (unit === 's'
+  ? `Zeitübung · Start ${fmtSec(t.startSec || 60)} · +${t.inc ?? 10} s pro Training`
+  : `Ziel ${t.sets} × ${t.repMin}${t.repMax !== t.repMin ? `–${t.repMax}` : ''} Wdh.`);
+export const fmtSec = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+const kgf = (v) => fmtNum(v, v % 1 ? 1 : 0);
+const round = (v, step) => Math.round(v / (step || 0.5)) * (step || 0.5);
+
+/** All logged sessions of an exercise, newest first (activities must be sorted newest first). */
+export function exerciseHistory(activities, exId, skipId) {
+  const out = [];
+  for (const a of activities) {
+    if (a.id === skipId) continue;
+    const hit = (a.exercises || []).find((e) => e.id === exId);
+    if (hit?.sets?.length) out.push({ date: a.date, sets: hit.sets, eval: !!a.eval, startKg: hit.startKg, progression: hit.progression || {} });
+  }
+  return out;
+}
+
+/**
+ * Double progression: once every working set reaches the top of the rep range at the same weight,
+ * suggest the next weight step. Twice in a row below the range → suggest ~10 % less.
+ * Timed exercises (unit 's') add `inc` seconds every session. `blocked` (string) suppresses increases.
+ */
+export function suggestNext(t, ex, hist, blocked) {
+  const inc = t.inc ?? defaultInc(ex);
+  const last = hist[0];
+  if (ex.unit === 's') {
+    if (!last) return { type: 'new', to: t.startSec || 60, text: `Erstes Mal: ${fmtSec(t.startSec || 60)} halten. Danach jedes Training +${inc} s.` };
+    const from = Math.max(...last.sets.map((x) => x.reps || 0));
+    if (blocked) return { type: 'blocked', from, to: from, text: `Heute gleich lang wie letztes Mal (${fmtSec(from)}): ${blocked}.` };
+    const to = from + inc;
+    return { type: 'time', from, to, text: `Letztes Mal ${fmtSec(from)}. Heute ${fmtSec(to)} (+${inc} s).${to > 180 ? ' Ab etwa 3 Minuten bringt längeres Halten kaum Zusatznutzen – überleg dir eine schwierigere Variante.' : ''}` };
+  }
+  if (last?.eval && last.startKg) return { type: 'eval', from: last.startKg, to: last.startKg, text: `Startgewicht aus der Einstufung: ${kgf(last.startKg)} kg. Ziel: ${t.repMin} saubere Wiederholungen pro Satz, 2–3 im Tank.` };
+  if (!last) return { type: 'new', text: `Erstes Mal: Wähle ein Gewicht, mit dem du ${t.repMin}–${t.repMax} saubere Wiederholungen schaffst und noch 1–3 im Tank hast.` };
+  const ws = last.sets.filter((x) => x.reps > 0);
+  const top = Math.max(0, ...ws.map((x) => x.kg || 0));
+  const work = top ? ws.filter((x) => (x.kg || 0) >= top) : ws;
+  const allTop = work.length >= t.sets && work.every((x) => x.reps >= t.repMax);
+  if (allTop) {
+    if (blocked) return { type: 'blocked', from: top, to: top, text: `Steigerung wäre fällig, heute aber beim Gewicht bleiben: ${blocked}.` };
+    if (!top || !inc) return { type: 'bw', text: `Alle Sätze mit ${t.repMax}+ Wiederholungen geschafft. Mach die Übung schwerer: schwierigere Variante oder Zusatzgewicht.` };
+    let holds = 0;
+    for (const h of hist) { if (h.progression?.sugg === 'up' && h.progression?.decision === 'hold') holds += 1; else break; }
+    const to = round(top + inc, inc < 1 ? inc : 0.5);
+    let text = `Letztes Mal alle Sätze mit ${kgf(top)} kg und mindestens ${t.repMax} Wdh. Steigere auf ${kgf(to)} kg und starte wieder bei ${t.repMin}.`;
+    if (holds === 1) text += ' Letztes Mal bist du schon beim Gewicht geblieben – heute ist ein guter Tag zum Steigern.';
+    if (holds >= 2) text += ` Du bist ${holds}× in Folge beim Gewicht geblieben, obwohl du bereit warst. Trau dich!`;
+    return { type: 'up', from: top, to, holds, text };
+  }
+  const fail = (sets) => sets.some((x) => x.reps < t.repMin);
+  if (fail(work) && hist[1]) {
+    const prev = hist[1].sets.filter((x) => x.reps > 0);
+    if (Math.max(0, ...prev.map((x) => x.kg || 0)) === top && fail(prev) && top) {
+      const to = Math.max(inc || 1, Math.floor((top * 0.9) / (inc || 1)) * (inc || 1));
+      return { type: 'down', from: top, to, text: `Zweimal in Folge unter ${t.repMin} Wdh. mit ${kgf(top)} kg. Vorschlag: ${kgf(to)} kg und sauber neu aufbauen.` };
+    }
+  }
+  return { type: 'same', from: top, text: `Gleiches Gewicht wie letztes Mal (${top ? `${kgf(top)} kg` : 'Körpergewicht'}). Ziel: mindestens eine Wiederholung mehr, bis ${t.repMax} in allen Sätzen.` };
+}
+
+/** Sets to pre-fill for a template item, following the suggestion and the athlete's decision. */
+export function prefillSets(t, ex, hist, sugg, decision) {
+  const n = Math.max(1, t.sets || 3);
+  const last = hist[0];
+  if (ex.unit === 's') {
+    const sec = sugg.type === 'time' ? (decision === 'hold' ? sugg.from : sugg.to) : (sugg.to || t.startSec || 60);
+    return Array.from({ length: n }, () => ({ reps: sec }));
+  }
+  const ws = (last?.sets || []).filter((x) => x.reps > 0);
+  const top = Math.max(0, ...ws.map((x) => x.kg || 0));
+  const work = top ? ws.filter((x) => (x.kg || 0) >= top) : ws;
+  return Array.from({ length: n }, (_, i) => {
+    const ls = work[i] || work[work.length - 1];
+    let kg = ls?.kg; let reps = ls?.reps;
+    if ((sugg.type === 'up' && decision === 'up') || (sugg.type === 'down' && decision === 'down') || sugg.type === 'eval') { kg = sugg.to; reps = t.repMin; }
+    return { kg, reps };
+  });
+}
+
+export function suggBox(plan, unit) {
+  const s = plan.sugg || {};
+  const d = plan.decision;
+  const btn = (dec, label) => `<button type="button" class="btn btn-sm${d === dec ? ' btn-primary' : ''}" data-action="ex-decide" data-dec="${dec}">${esc(label)}</button>`;
+  let buttons = '';
+  if (s.type === 'up') buttons = btn('up', `Auf ${kgf(s.to)} kg steigern`) + btn('hold', `Beim Gewicht bleiben (${kgf(s.from)} kg)`);
+  if (s.type === 'time') buttons = btn('up', `${fmtSec(s.to)} halten`) + btn('hold', `Wie letztes Mal (${fmtSec(s.from)})`);
+  if (s.type === 'down') buttons = btn('down', `Auf ${kgf(s.to)} kg reduzieren`) + btn('keep', 'Gewicht behalten');
+  return `<div class="sugg sugg-${esc(s.type || 'none')}"><p>${esc(s.text || '')}</p>${buttons ? `<div class="ex-actions">${buttons}</div>` : ''}</div>`;
+}
+
+/** Template preset: the runner-friendly strength plan A/B (heavy legs, jumps, single-leg, calves, hips, shoulders). */
+export const PRESET_EXERCISES = [
+  { id: 'c_wadenheben_sitzend', name: 'Wadenheben sitzend (Knie gebeugt)', group: 'Beine' },
+  { id: 'c_liegestuetze_box', name: 'Liegestütze, Füsse auf Box', group: 'Brust', bw: true },
+];
+const it = (id, sets, repMin, repMax, extra = {}) => ({ id, sets, repMin, repMax, ...extra });
+export const PRESET_TEMPLATES = [
+  { id: 'tpl_a', name: 'Training A', items: [
+    it('pogo_jump', 3, 15, 15), it('squat', 4, 5, 6), it('romanian_deadlift', 3, 6, 8), it('calf_raise', 3, 8, 12),
+    it('db_bench', 4, 6, 6), it('db_row', 4, 6, 6), it('db_shoulder_press', 3, 8, 10), it('hanging_leg_raise', 3, 10, 10),
+    it('side_plank', 2, 1, 1, { startSec: 30, inc: 5 }), it('plank', 1, 1, 1, { startSec: 150, inc: 10 }),
+  ] },
+  { id: 'tpl_b', name: 'Training B', items: [
+    it('box_jump', 3, 5, 5), it('bulgarian_split_squat', 3, 6, 8), it('single_leg_rdl', 3, 8, 8), it('hip_thrust', 3, 6, 8),
+    it('c_wadenheben_sitzend', 3, 10, 15), it('pull_up', 4, 6, 10), it('c_liegestuetze_box', 3, 10, 15),
+    it('pallof_press', 3, 10, 10), it('face_pull', 2, 12, 15), it('plank', 1, 1, 1, { startSec: 150, inc: 10 }),
+  ] },
+];
+
+/** Template that is due next: today's plan wins, otherwise the one after the last template session. */
+export function nextTemplate(templates, activities) {
+  if (!templates.length) return null;
+  const last = activities.find((a) => a.templateId && !a.eval && templates.some((t) => t.id === a.templateId));
+  if (!last) return templates[0];
+  const i = templates.findIndex((t) => t.id === last.templateId);
+  return templates[(i + 1) % templates.length];
+}
+
+/** Warm-up sets for a heavy first exercise: ~50 % × 8, ~75 % × 3. */
+export function warmupSets(kg, inc = 2.5) {
+  if (!kg || kg < 10) return '';
+  const r = (v) => kgf(Math.max(inc, Math.round(v / inc) * inc));
+  return `Aufwärmsätze: ${r(kg * 0.5)} kg × 8 · ${r(kg * 0.75)} kg × 3, dann die Arbeitssätze`;
+}
+export const WARMUP = [
+  '5 Min. locker: Velo, Rudergerät oder Seilspringen',
+  'Beinschwingen vor/zurück und seitlich, je 10 pro Bein',
+  'Ausfallschritte mit Oberkörperdrehung, je 5 pro Seite',
+  "World's Greatest Stretch, je 3 pro Seite",
+  'Kniebeugen ohne Gewicht, 10 Wdh.',
+  'Schulterkreisen und Band-Pull-aparts, 15 Wdh.',
+];

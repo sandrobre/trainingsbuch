@@ -8,6 +8,8 @@ import { bars, line, sparkline, ring, hbars, legend } from './charts.js';
 import {
   MUSCLE_GROUPS, FOCUS, PHASES, DIETS, catalog, normalizeProfile, bestE1rm, volume, fmtSets,
   lastSession, setRow, exerciseBlock, readExercises, slug,
+  exerciseHistory, suggestNext, prefillSets, suggBox, defaultInc, nextTemplate, warmupSets, WARMUP,
+  PRESET_TEMPLATES, PRESET_EXERCISES, targetText,
 } from './training.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -256,6 +258,7 @@ function renderToday() {
     ${demoBanner()}${pendingBanner()}
     <section class="grid hero">${readiness}${brief}</section>
     <section class="kpis">${KPIS.map((k) => kpiTile(k, days)).join('')}${vo2}</section>
+    ${strengthCard(acts)}
     <section class="grid two">
       ${weekLoadCard(acts)}
       <article class="card">
@@ -267,6 +270,20 @@ function renderToday() {
       <header class="card-head"><h2>Letzte Aktivitäten</h2><a class="link" href="#/aktivitaeten">Alle ${icon('chevron', 14)}</a></header>
       <div class="act-list">${acts.slice(0, 5).map(actRow).join('') || '<p class="muted">Noch keine Aktivitäten.</p>'}</div>
     </article>`;
+}
+
+function strengthCard(acts) {
+  const p = profile();
+  if (!p.templates.length || (p.sports?.length && !p.sports.includes('strength'))) return '';
+  const next = nextTemplate(p.templates, acts);
+  return `<article class="card strength-next">
+    <div><p class="eyebrow">Krafttraining</p><h2>Als Nächstes: ${esc(next.name)}</h2>
+    <p class="muted small">${esc(next.items.map((i) => catalog(p).find((e) => e.id === i.id)?.name || i.id).join(' · '))}</p></div>
+    <div class="ex-actions">
+      <button class="btn btn-primary" data-action="tpl-start" data-id="${esc(next.id)}">${icon('plus', 16)}${esc(next.name)} starten</button>
+      ${p.templates.filter((t) => t.id !== next.id).map((t) => `<button class="btn" data-action="tpl-start" data-id="${esc(t.id)}">${esc(t.name)}</button>`).join('')}
+    </div>
+  </article>`;
 }
 
 // ───────────────────────── page: activities ─────────────────────────
@@ -375,9 +392,11 @@ function openActivity(id) {
   </div>`);
 }
 
-function openForm(existing) {
+function openForm(existing, opts = {}) {
   const mode = !existing ? 'new' : existing.source === 'garmin' ? 'garmin' : 'edit';
-  const a = existing || { type: 'football', date: todayISO(), football: { kind: 'training' } };
+  const prof0 = profile();
+  const defType = opts.templateId ? 'strength' : !prof0.sports?.length || prof0.sports.includes('football') ? 'football' : prof0.sports[0];
+  const a = existing || { type: defType, date: todayISO(), football: { kind: 'training' } };
   const f = a.football || { kind: 'training' };
   const now = new Date();
   const time = a.start?.slice(11, 16) || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -429,6 +448,10 @@ function openForm(existing) {
 
     <fieldset class="strength-fields">
       <legend>Übungen</legend>
+      <input type="hidden" name="templateId" value="${esc(a.templateId || '')}">
+      ${p.templates.length ? `<div class="tpl-pick"><span class="muted small">Vorlage laden:</span>${p.templates.map((t) => `<button type="button" class="btn btn-sm${t.id === a.templateId ? ' btn-primary' : ''}" data-action="tpl-load" data-id="${esc(t.id)}">${esc(t.name)}</button>`).join('')}</div>`
+        : '<p class="muted small">Tipp: Unter Einstellungen → Trainingsvorlagen legst du Vorlagen (z. B. Training A/B) an. Dann sind Gewichte vom letzten Mal schon eingetragen und Steigerungen werden vorgeschlagen.</p>'}
+      ${mode === 'new' ? `<details class="warmup"><summary>Aufwärmen <span class="muted small">ca. 8 Min.</span></summary><ul>${WARMUP.map((w) => `<li><label><input type="checkbox" name="warm" value="1">${esc(w)}</label></li>`).join('')}</ul><p class="muted small">Keine langen statischen Dehnungen vor dem Krafttraining.</p></details>` : ''}
       <div class="ex-list">${(a.exercises || []).map((e) => exerciseBlock(e, lastSession(all, e.id, a.id))).join('')}</div>
       <div class="ex-add">
         <input id="ex-search" list="ex-options" placeholder="Übung suchen oder neue eintippen …" autocomplete="off" enterkeyhint="done">
@@ -455,6 +478,33 @@ function openForm(existing) {
       <button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button>
     </footer>
   </form>`);
+  if (opts.templateId) loadTemplate($('#act-form'), opts.templateId);
+}
+
+/** Fill the strength form from a template: last values pre-filled, progression suggested. */
+function loadTemplate(form, tplId) {
+  const p = profile();
+  const t = p.templates.find((x) => x.id === tplId);
+  if (!form || !t) return;
+  const cat = catalog(p);
+  const all = activities();
+  form.querySelector('[name=type][value=strength]').checked = true;
+  if (!form.elements.title.value.trim() || p.templates.some((x) => x.name === form.elements.title.value.trim())) form.elements.title.value = t.name;
+  form.elements.templateId.value = t.id;
+  form.querySelectorAll('[data-action=tpl-load]').forEach((b) => b.classList.toggle('btn-primary', b.dataset.id === t.id));
+  let warm = 0;
+  form.querySelector('.ex-list').innerHTML = t.items.map((item) => {
+    const ex = cat.find((e) => e.id === item.id) || { id: item.id, name: item.id, group: 'Eigene' };
+    const target = { ...item, inc: item.inc ?? defaultInc(ex) };
+    const hist = exerciseHistory(all, ex.id, form.dataset.id);
+    const sugg = suggestNext(target, ex, hist, null);
+    const decision = sugg.type === 'up' || sugg.type === 'time' ? 'up' : '';
+    const sets = prefillSets(target, ex, hist, sugg, decision);
+    let html = exerciseBlock({ ...ex, sets }, hist[0], { target, sugg, decision });
+    const kg = sets[0]?.kg;
+    if (warm < 2 && ex.unit !== 's' && kg >= 10) { warm += 1; html = html.replace('<div class="sets">', `<p class="muted small warm-sets">${esc(warmupSets(kg, target.inc || 2.5))}</p><div class="sets">`); }
+    return html;
+  }).join('');
 }
 
 async function submitActivity(form) {
@@ -479,6 +529,8 @@ async function submitActivity(form) {
   };
   const exercises = type === 'strength' ? readExercises(form) : [];
   if (exercises.length) common.exercises = exercises;
+  if (type === 'strength' && fd.get('templateId')) common.templateId = fd.get('templateId');
+  if (type === 'strength' && fd.getAll('warm').length) common.warmup = fd.getAll('warm').length;
   const newExercises = JSON.parse(form.dataset.newExercises || '[]').filter((n) => exercises.some((e) => e.id === n.id));
 
   const submit = form.querySelector('[type=submit]');
@@ -791,6 +843,7 @@ function renderSettings() {
 
       ${goalsCard(p)}
       ${nutritionCard(p)}
+      ${templatesCard(p)}
       ${exercisesCard(p)}
 
       <article class="card">
@@ -884,6 +937,56 @@ function exercisesCard(p) {
       ${MUSCLE_GROUPS.filter((g) => g !== 'Eigene').map((g) => `<p class="small"><strong>${g}:</strong> ${catalog({}).filter((e) => e.group === g).map((e) => esc(e.name)).join(', ')}</p>`).join('')}
     </details>
   </article>`;
+}
+
+function tplItemRow(item, cat) {
+  const ex = cat.find((e) => e.id === item.id);
+  const timed = ex?.unit === 's';
+  return `<div class="tpl-row${timed ? ' timed' : ''}">
+    <label class="field grow"><span>Übung</span><select name="ex">${cat.map((e) => `<option value="${esc(e.id)}" ${e.id === item.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>
+    <label class="field"><span>Sätze</span><input name="sets" type="number" min="1" max="10" inputmode="numeric" value="${esc(item.sets ?? 3)}"></label>
+    <label class="field reps-only"><span>Wdh. von</span><input name="repMin" type="number" min="1" inputmode="numeric" value="${esc(item.repMin ?? 8)}"></label>
+    <label class="field reps-only"><span>bis</span><input name="repMax" type="number" min="1" inputmode="numeric" value="${esc(item.repMax ?? 10)}"></label>
+    <label class="field time-only"><span>Start (s)</span><input name="startSec" type="number" min="5" inputmode="numeric" value="${esc(item.startSec ?? 60)}"></label>
+    <label class="field"><span>+ Schritt</span><input name="inc" type="number" min="0" step="0.25" inputmode="decimal" value="${esc(item.inc ?? defaultInc(ex))}"></label>
+    <button type="button" class="icon-btn sm" data-action="tpl-row-remove" aria-label="Übung entfernen">${icon('trash', 16)}</button>
+  </div>`;
+}
+
+function templatesCard(p) {
+  const cat = catalog(p);
+  return `<article class="card templates-card">
+    <header class="card-head"><h2>🏋️ Trainingsvorlagen</h2><span class="muted small">${p.templates.length} Vorlage${p.templates.length === 1 ? '' : 'n'}</span></header>
+    <p class="muted small">Beim Erfassen lädst du eine Vorlage: Die Werte vom letzten Mal sind eingetragen, und die App schlägt Steigerungen vor (doppelte Progression). Du kannst jederzeit beim Gewicht bleiben. «+ Schritt» ist kg pro Steigerung, bei Zeitübungen Sekunden.</p>
+    ${p.templates.map((t) => `<form class="form tpl-form" data-id="${esc(t.id)}">
+      <label class="field"><span>Name</span><input name="name" value="${esc(t.name)}" required maxlength="40"></label>
+      <div class="tpl-rows">${t.items.map((i) => tplItemRow(i, cat)).join('')}</div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-sm" data-action="tpl-row-add">${icon('plus', 14)}Übung</button>
+        <button type="button" class="btn btn-sm btn-danger" data-action="tpl-delete" data-id="${esc(t.id)}">Vorlage löschen</button>
+        <button type="submit" class="btn btn-sm btn-primary">${icon('check', 14)}Speichern</button>
+      </div>
+    </form>`).join('')}
+    <div class="form-actions">
+      <button class="btn" data-action="tpl-new">${icon('plus', 16)}Neue Vorlage</button>
+      ${PRESET_TEMPLATES.some((pt) => !p.templates.some((t) => t.id === pt.id)) ? `<button class="btn" data-action="tpl-preset">Kraftplan für Läufer A/B übernehmen</button>` : ''}
+    </div>
+  </article>`;
+}
+
+function submitTemplate(form) {
+  const rows = [...form.querySelectorAll('.tpl-row')];
+  const n = (r, k) => (r.querySelector(`[name=${k}]`).value === '' ? undefined : Number(r.querySelector(`[name=${k}]`).value));
+  const cat = catalog(profile());
+  const items = rows.map((r) => {
+    const id = r.querySelector('[name=ex]').value;
+    const timed = cat.find((e) => e.id === id)?.unit === 's';
+    const item = { id, sets: n(r, 'sets') || 3, repMin: n(r, 'repMin') || 8, repMax: Math.max(n(r, 'repMax') || 0, n(r, 'repMin') || 8), inc: n(r, 'inc') ?? 0 };
+    if (timed) Object.assign(item, { repMin: 1, repMax: 1, startSec: n(r, 'startSec') || 60 });
+    return item;
+  });
+  const name = form.elements.name.value.trim() || 'Vorlage';
+  return saveProfile((p) => ({ ...p, templates: p.templates.map((t) => (t.id === form.dataset.id ? { ...t, name, items } : t)) }), `«${name}» gespeichert`);
 }
 
 async function saveProfile(mutate, message) {
@@ -1045,7 +1148,7 @@ function render(transition = false) {
     } else {
       view.innerHTML = ROUTES[state.route].render();
     }
-    document.title = `${ROUTES[state.route].title} · Healthy Football`;
+    document.title = `${ROUTES[state.route].title} · Trainingsbuch`;
     $('#topbar-title').textContent = ROUTES[state.route].title;
     document.querySelectorAll('[data-route]').forEach((el) => {
       if (el.dataset.route === state.route) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
@@ -1137,6 +1240,33 @@ const actions = {
     const block = el.closest('.ex-block');
     block.querySelector('.sets').innerHTML = JSON.parse(el.dataset.sets).map((s) => setRow(s, block.dataset.exUnit)).join('');
   },
+  'tpl-start': (el) => openForm(null, { templateId: el.dataset.id }),
+  'tpl-load': (el) => loadTemplate(el.closest('form'), el.dataset.id),
+  'ex-decide': (el) => {
+    const block = el.closest('.ex-block');
+    const form = el.closest('form');
+    const plan = JSON.parse(block.dataset.plan);
+    const decision = el.dataset.dec === 'keep' ? '' : el.dataset.dec;
+    block.dataset.decision = decision;
+    const hist = exerciseHistory(activities(), block.dataset.exId, form?.dataset.id);
+    const sets = prefillSets(plan.target, { unit: block.dataset.exUnit }, hist, plan.sugg, decision || null);
+    block.querySelector('.sets').innerHTML = sets.map((x) => setRow(x, block.dataset.exUnit)).join('');
+    block.querySelector('.sugg').outerHTML = suggBox({ ...plan, decision }, block.dataset.exUnit);
+  },
+  'tpl-new': () => saveProfile((p) => ({ ...p, templates: [...p.templates, { id: `tpl_${Date.now().toString(36)}`, name: `Training ${String.fromCharCode(65 + p.templates.length)}`, items: [] }] }), 'Neue Vorlage angelegt'),
+  'tpl-preset': () => saveProfile((p) => ({
+    ...p,
+    sports: p.sports?.length && !p.sports.includes('strength') ? [...p.sports, 'strength'] : p.sports,
+    customExercises: [...p.customExercises, ...PRESET_EXERCISES.filter((e) => !p.customExercises.some((c) => c.id === e.id))],
+    templates: [...p.templates, ...PRESET_TEMPLATES.filter((t) => !p.templates.some((x) => x.id === t.id))],
+  }), 'Kraftplan A/B übernommen'),
+  'tpl-delete': (el) => {
+    const t = profile().templates.find((x) => x.id === el.dataset.id);
+    if (!t || !confirm(`Vorlage «${t.name}» löschen? Erfasste Trainings bleiben erhalten.`)) return;
+    saveProfile((p) => ({ ...p, templates: p.templates.filter((x) => x.id !== t.id) }), `«${t.name}» gelöscht`);
+  },
+  'tpl-row-add': (el) => el.closest('form').querySelector('.tpl-rows').insertAdjacentHTML('beforeend', tplItemRow({ id: catalog(profile())[0].id }, catalog(profile()))),
+  'tpl-row-remove': (el) => el.closest('.tpl-row').remove(),
   'add-target': () => $('#goals-form .targets').insertAdjacentHTML('beforeend', targetRow()),
   'remove-target': (el) => el.closest('.target-row').remove(),
   'remove-exercise': (el) => {
@@ -1182,6 +1312,7 @@ document.addEventListener('click', (e) => {
 });
 document.addEventListener('submit', (e) => {
   if (forms[e.target.id]) { e.preventDefault(); forms[e.target.id](e.target); }
+  else if (e.target.classList?.contains('tpl-form')) { e.preventDefault(); submitTemplate(e.target); }
 });
 document.addEventListener('input', (e) => {
   if (e.target.getAttribute?.('aria-invalid')) e.target.removeAttribute('aria-invalid');
@@ -1201,6 +1332,12 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.dataset.pref) store.savePrefs({ [e.target.dataset.pref]: e.target.checked });
   if (e.target.id === 'trend-ex') { state.trendExercise = e.target.value; render(); }
+  if (e.target.name === 'ex' && e.target.closest('.tpl-row')) {
+    const row = e.target.closest('.tpl-row');
+    const ex = catalog(profile()).find((x) => x.id === e.target.value);
+    row.classList.toggle('timed', ex?.unit === 's');
+    row.querySelector('[name=inc]').value = defaultInc(ex);
+  }
   // picking a suggestion from the exercise list adds it right away
   if (e.target.id === 'ex-search' && catalog(profile()).some((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase())) addExercise();
 });

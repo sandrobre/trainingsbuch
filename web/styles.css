@@ -7,7 +7,7 @@
   --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --bg:        light-dark(#f5f6f2, #0c0e11);
+  --bg:        light-dark(#fbf6f2, #0f0c0f);
   --surface:   light-dark(#ffffff, #15181c);
   --surface-2: light-dark(#eff1eb, #1d2126);
   --border:    light-dark(#e2e5dc, #272c33);
@@ -17,10 +17,10 @@
   --ink-2:     light-dark(#4a4f49, #b3b9b1);
   --ink-3:     light-dark(#81877f, #7c847b);
 
-  --accent:      light-dark(#3a8f1f, #7ee05a);
-  --accent-text: light-dark(#2f7a17, #8fe96c);
-  --accent-soft: light-dark(#e6f3df, #1d2b18);
-  --on-accent:   light-dark(#ffffff, #0c0e11);
+  --accent:      light-dark(#d9481f, #ff7a52);
+  --accent-text: light-dark(#b73a14, #ff936f);
+  --accent-soft: light-dark(#fde6dc, #3a2017);
+  --on-accent:   light-dark(#ffffff, #1b0f12);
 
   --good: light-dark(#1a7f37, #5fd068);
   --warn: light-dark(#a35a00, #f0a33a);
@@ -99,6 +99,9 @@ p { text-wrap: pretty; }
   box-shadow: inset 0 0 0 1px var(--border);
 }
 .brand-mark.sm { width: 32px; height: 32px; font-size: 16px; }
+img.brand-mark, .brand-mark img { width: 36px; height: 36px; padding: 0; background: none; box-shadow: 0 6px 14px -6px rgb(220 80 40 / .7); border-radius: 11px; display: block; }
+.brand-mark.sm img { width: 32px; height: 32px; }
+.brand-mark.sm:has(img) { background: none; box-shadow: none; }
 
 .tabbar {
   position: fixed; inset-inline: 0; bottom: 0; z-index: 30;
@@ -586,3 +589,27 @@ legend { font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-bottom
 /* missing required fields */
 [aria-invalid="true"] { border-color: var(--bad) !important; box-shadow: 0 0 0 3px color-mix(in oklab, var(--bad) 22%, transparent); }
 .toasts-in-dialog { position: sticky; bottom: 84px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 0 16px; pointer-events: none; }
+
+/* ───────── templates & progression (Trainingsbuch) ───────── */
+.tpl-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.sugg { margin: 4px 0 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border-left: 4px solid var(--border); font-size: 14px; }
+.sugg .ex-actions { margin-top: 8px; }
+.sugg-up, .sugg-time, .sugg-eval { border-left-color: var(--good); }
+.sugg-down, .sugg-blocked { border-left-color: var(--warn); }
+.warm-sets { margin: -4px 0 8px; }
+details.warmup { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 10px 12px; }
+details.warmup summary { cursor: pointer; font-weight: 600; }
+details.warmup ul { list-style: none; padding: 0; margin-top: 8px; display: grid; gap: 6px; }
+details.warmup label { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; }
+.strength-next { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.tpl-form { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.tpl-rows { display: grid; gap: 10px; }
+.tpl-row { display: grid; grid-template-columns: minmax(0, 2.4fr) repeat(4, minmax(0, 1fr)) 36px; gap: 8px; align-items: end; }
+.tpl-row .time-only { display: none; }
+.tpl-row.timed .reps-only { display: none; }
+.tpl-row.timed .time-only { display: flex; }
+.tpl-row.timed { grid-template-columns: minmax(0, 2.4fr) repeat(3, minmax(0, 1fr)) 36px; }
+@media (max-width: 640px) {
+  .tpl-row, .tpl-row.timed { grid-template-columns: repeat(4, minmax(0, 1fr)) 36px; }
+  .tpl-row > .field.grow { grid-column: 1 / -1; }
+}

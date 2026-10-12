@@ -1,5 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0c0e11"/>
-  <circle cx="256" cy="256" r="150" fill="none" stroke="#7ee05a" stroke-width="28"/>
-  <path d="M120 300 L200 300 L232 214 L278 352 L312 256 L392 256" fill="none" stroke="#7ee05a" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e8492a"/><stop offset=".6" stop-color="#f2762f"/><stop offset="1" stop-color="#f7a63c"/></linearGradient>
+    <clipPath id="c"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#c)">
+    <rect width="512" height="512" fill="url(#g)"/>
+    <path d="M-50 590 L590 -50" stroke="#fff" stroke-opacity=".16" stroke-width="115"/>
+    <path d="M100 640 L640 100" stroke="#fff" stroke-opacity=".08" stroke-width="64"/>
+  </g>
+  <text x="260" y="341" text-anchor="middle" font-family="Inter, 'Arial Black', Helvetica, Arial, sans-serif" font-weight="900" font-size="218" letter-spacing="-12" fill="#fff">SB</text>
 </svg>
