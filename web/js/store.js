@@ -172,8 +172,9 @@ export function saveAnnotation(id, annotation) {
   }, `Garmin-Aktivität ergänzt (${id})`);
 }
 
-export function saveProfile(profile) {
-  return write('profile', () => profile, 'Profil aktualisiert');
+/** Read-modify-write the profile so separate settings forms never overwrite each other. */
+export function updateProfile(mutate) {
+  return write('profile', mutate, 'Profil aktualisiert');
 }
 
 // Questions go into the private data repo – workflow inputs show up in the (public) Actions logs.

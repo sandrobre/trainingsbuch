@@ -4,6 +4,8 @@ Persönliches Trainings-Dashboard für **Laufen und Fussball**. Die App läuft a
 
 - übernimmt **Läufe, Trainings und Gesundheitsdaten automatisch von Garmin Connect** (alle 3 Stunden),
 - lässt dich **zusätzliche Trainings erfassen** (Fussballtraining, Matches, Kraft …) und Garmin-Aktivitäten ergänzen (RPE, Gefühl, Notizen, Sportart),
+- hat ein **Kraft-Logbuch**: Übung aus der Liste wählen, Sätze mit kg × Wiederholungen eintragen, «Letztes Mal» sehen, Fortschritt (geschätztes 1RM) in den Trends; eigene Übungen in den Einstellungen,
+- kennt deine **Ziele** (z.B. Ausdauer, Kraft, Matchfitness, messbare Ziele mit Datum, Saisonphase) und gibt auf Wunsch **Ernährungs-Faustregeln** vor/nach Training und Match,
 - lässt **Claude** auf Knopfdruck alles analysieren: Tagesform, Belastung, Tipps fürs Laufen und für Fussball-Fitness, einen 7-Tage-Plan und Antworten auf deine Fragen.
 
 Ohne Einrichtung startet die App im **Demo-Modus** mit Beispieldaten.

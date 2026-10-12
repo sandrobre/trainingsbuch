@@ -337,6 +337,7 @@ p { text-wrap: pretty; }
   position: fixed; left: 0; top: 0; z-index: 200; max-width: 260px; padding: 8px 11px; border-radius: 10px;
   background: var(--ink); color: var(--bg); font-size: 12.5px; line-height: 1.45; pointer-events: none; box-shadow: var(--shadow-lg);
 }
+.tip { right: auto; bottom: auto; margin: 0; border: 0; overflow: visible; }
 .tip[hidden] { display: none; }
 .tip b { font-weight: 700; }
 
@@ -513,6 +514,7 @@ legend { font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-bottom
 .spinner { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin .8s linear infinite; }
 @keyframes spin { to { rotate: 360deg; } }
 
+.toasts { inset: auto; margin: 0; border: 0; padding: 0; background: transparent; overflow: visible; color: inherit; }
 .toasts { position: fixed; z-index: 300; left: 50%; translate: -50% 0; bottom: calc(96px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 8px; width: min(92vw, 420px); pointer-events: none; }
 @media (min-width: 960px) { .toasts { left: auto; right: 24px; translate: none; bottom: 24px; } }
 .toast {
@@ -534,3 +536,53 @@ legend { font-size: 12.5px; font-weight: 650; color: var(--ink-2); margin-bottom
 @media (forced-colors: active) {
   .bar-stack i, .hbar-track i, .legend i { forced-color-adjust: none; }
 }
+
+/* ───────── strength logbook ───────── */
+.strength-fields { display: none !important; }
+#act-form:has([name=type][value=strength]:checked) .strength-fields { display: flex !important; flex-direction: column; gap: 12px; padding: 14px; border-radius: 16px; background: color-mix(in oklab, var(--s-strength) 8%, var(--surface-2)); }
+.strength-fields legend { float: left; width: 100%; margin: 0; }
+.ex-list { display: flex; flex-direction: column; gap: 10px; }
+.ex-block { background: var(--surface); border-radius: 14px; padding: 12px; border: 1px solid var(--border); }
+.ex-block header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.ex-block header > div { display: flex; flex-direction: column; min-width: 0; }
+.sets { display: flex; flex-direction: column; gap: 6px; counter-reset: set; }
+.set-row { display: grid; grid-template-columns: 22px 1fr auto 1fr 36px; align-items: center; gap: 8px; }
+.set-no::before { counter-increment: set; content: counter(set); font: 600 13px var(--mono); color: var(--ink-3); }
+.set-row label { position: relative; }
+.set-row input { text-align: center; font: 600 16px var(--mono) !important; padding-right: 34px !important; }
+.set-row small { position: absolute; right: 10px; top: 50%; translate: 0 -50%; font-size: 11px; color: var(--ink-3); pointer-events: none; }
+.set-row .times { color: var(--ink-3); font-weight: 600; }
+.set-row input { appearance: textfield; -moz-appearance: textfield; }
+.set-row input::-webkit-inner-spin-button, .set-row input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.ex-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.ex-add { display: flex; gap: 8px; }
+.ex-add input { flex: 1; }
+.icon-btn.sm { width: 34px; height: 34px; border-radius: 10px; }
+.ex-summary { display: grid; gap: 8px; }
+.ex-line { display: grid; gap: 2px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.ex-line > span:not(.muted) { font: 500 14px var(--mono); }
+.plan-food { color: var(--ink) !important; font-size: 13px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.mini-select { width: auto !important; min-height: 34px !important; padding: 4px 10px !important; font-size: 13px; max-width: 55%; }
+
+/* ───────── goals & settings ───────── */
+.chip-checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-checks legend { width: 100%; }
+.chip-checks label { display: inline-flex; align-items: center; height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; font-weight: 600; color: var(--ink-2); cursor: pointer; transition: all .15s; }
+.chip-checks label:has(:checked) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.chip-checks label:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip-checks input { position: absolute; opacity: 0; pointer-events: none; }
+.targets { display: flex; flex-direction: column; gap: 10px; }
+.target-row { align-items: flex-end; }
+.add-target { align-self: flex-start; }
+.custom-ex { list-style: none; padding: 0; display: grid; gap: 6px; }
+.custom-ex li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--surface-2); }
+.builtin-ex { margin-top: 12px; }
+.builtin-ex summary { cursor: pointer; }
+.builtin-ex p { margin-top: 8px; color: var(--ink-2); }
+.segmented.tabs { overflow-x: auto; scrollbar-width: none; }
+.segmented.tabs > button { flex: 1 0 auto; }
+.type-picker legend em { font-style: normal; font-weight: 500; }
+
+/* missing required fields */
+[aria-invalid="true"] { border-color: var(--bad) !important; box-shadow: 0 0 0 3px color-mix(in oklab, var(--bad) 22%, transparent); }
+.toasts-in-dialog { position: sticky; bottom: 84px; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 0 16px; pointer-events: none; }

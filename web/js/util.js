@@ -155,6 +155,30 @@ export function icon(name, size = 20) {
   return `<svg class="icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[name] || ''}"/></svg>`;
 }
 
+// Toasts and the tooltip are popovers: they live in the browser's top layer and therefore appear above an
+// open <dialog>. Re-opening moves them in front of whatever was opened in between.
+const popoverSupported = typeof HTMLElement !== 'undefined' && 'popover' in HTMLElement.prototype;
+
+/** Returns false when the element could not be put into the top layer (no popover support). */
+function showOnTop(el) {
+  if (!popoverSupported) { el.hidden = false; return false; }
+  if (!el.hasAttribute('popover')) el.setAttribute('popover', 'manual'); // e.g. an older cached index.html
+  try {
+    if (el.matches(':popover-open')) el.hidePopover();
+    el.showPopover();
+    return true;
+  } catch {
+    el.hidden = false;
+    return false;
+  }
+}
+function hideTop(el) {
+  try {
+    if (popoverSupported && el.matches(':popover-open')) el.hidePopover();
+  } catch { /* already hidden */ }
+  if (!popoverSupported) el.hidden = true;
+}
+
 // ── toast ──
 export function toast(message, kind = 'ok', ms = 3500) {
   const host = document.getElementById('toasts');
@@ -162,8 +186,28 @@ export function toast(message, kind = 'ok', ms = 3500) {
   el.className = `toast toast-${kind}`;
   el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
   el.innerHTML = `${icon(kind === 'error' ? 'alert' : 'check', 18)}<span>${esc(message)}</span>`;
+  const dialog = document.querySelector('dialog[open]');
+  // only re-stack when needed (a dialog may have opened since) – re-showing restarts running animations
+  const needsFront = !popoverSupported || !host.matches(':popover-open') || dialog;
   host.append(el);
-  setTimeout(() => { el.classList.add('out'); el.addEventListener('animationend', () => el.remove()); }, ms);
+  if (needsFront && !showOnTop(host) && dialog) {
+    // fallback without popover support: show the toast inside the open dialog so it is not hidden behind it
+    let local = dialog.querySelector('.toasts-in-dialog');
+    if (!local) {
+      local = document.createElement('div');
+      local.className = 'toasts-in-dialog';
+      local.setAttribute('aria-live', 'polite');
+      dialog.append(local);
+    }
+    local.append(el);
+  }
+  setTimeout(() => {
+    el.classList.add('out');
+    el.addEventListener('animationend', () => {
+      el.remove();
+      if (!host.children.length) hideTop(host);
+    });
+  }, ms);
 }
 
 // ── tooltip for any element with data-tip (hover on desktop, tap on touch) ──
@@ -173,7 +217,7 @@ export function initTooltip() {
   const show = (el) => {
     current = el;
     tip.innerHTML = el.dataset.tip;
-    tip.hidden = false;
+    showOnTop(tip);
     const r = el.getBoundingClientRect();
     const t = tip.getBoundingClientRect();
     const x = Math.min(Math.max(8, r.left + r.width / 2 - t.width / 2), innerWidth - t.width - 8);
@@ -181,7 +225,7 @@ export function initTooltip() {
     if (y < 8) y = r.bottom + 8;
     tip.style.translate = `${x}px ${y}px`;
   };
-  const hide = () => { current = null; tip.hidden = true; };
+  const hide = () => { current = null; hideTop(tip); };
   document.addEventListener('pointerover', (e) => {
     const el = e.target.closest('[data-tip]');
     if (el && el !== current) show(el);
