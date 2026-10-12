@@ -8,6 +8,19 @@ function rng(seed) {
   };
 }
 
+const kg = (v) => Math.round(v / 2.5) * 2.5;
+const sets = (n, reps, weight) => Array.from({ length: n }, () => (weight ? { kg: weight, reps } : { reps }));
+// weekly leg & core session with slow, realistic progression
+function strengthSession(progress) {
+  return [
+    { id: 'squat', name: 'Kniebeuge (Langhantel)', group: 'Beine', sets: sets(3, 5, kg(70 + progress * 15)) },
+    { id: 'romanian_deadlift', name: 'Rumänisches Kreuzheben', group: 'Gesäss & Hüfte', sets: sets(3, 8, kg(60 + progress * 12)) },
+    { id: 'bulgarian_split_squat', name: 'Bulgarian Split Squat', group: 'Beine', sets: sets(3, 8, kg(12 + progress * 6)) },
+    { id: 'nordic_curl', name: 'Nordic Hamstring Curls', group: 'Prävention & Sprung', sets: sets(3, Math.round(4 + progress * 3)) },
+    { id: 'copenhagen', name: 'Copenhagen Plank', group: 'Prävention & Sprung', unit: 's', sets: sets(2, Math.round(20 + progress * 15)) },
+  ];
+}
+
 export function demoData() {
   const rand = rng(42);
   const jitter = (base, spread) => base + (rand() - 0.5) * 2 * spread;
@@ -64,6 +77,7 @@ export function demoData() {
         id: `gdemos${back}`, source: 'garmin', type: 'strength', garminType: 'strength_training',
         title: 'Krafttraining Beine & Core', date, start: `${date}T07:00:00`, durationMin: Math.round(jitter(50, 8)),
         avgHr: Math.round(jitter(118, 6)), calories: Math.round(jitter(320, 40)), trainingLoad: Math.round(jitter(45, 10)),
+        exercises: strengthSession(progress),
       });
     }
 
@@ -87,18 +101,18 @@ export function demoData() {
 
   // one template per weekday (0 = Monday), matching the demo training rhythm
   const week = [
-    ['run', 'Lockerer Regenerationslauf', 40, 'locker', '40′ sehr locker @ 5:50–6:10/km, Puls unter 145. Danach 10′ Mobility.'],
-    ['football', 'Mannschaftstraining', 90, 'mittel', 'Fester Termin. Im Aufwärmen 4 Steigerungsläufe über 60 m.'],
-    ['run', 'Intervalle 6×800 m', 55, 'hart', '15′ einlaufen, 6×800 m @ 4:05/km mit 2′ Trabpause, 10′ auslaufen.'],
-    ['football', 'Mannschaftstraining', 90, 'mittel', 'Fester Termin. Nach dem Training 3×5 Nordic Hamstring Curls.'],
-    ['rest', 'Ruhetag vor dem Match', 0, 'Ruhe', 'Spaziergang, genug trinken, kohlenhydratreich essen, früh schlafen.'],
-    ['football', 'Match', 90, 'hart', 'Dynamisches Aufwärmen 20′. Nach dem Spiel 10′ auslaufen.'],
-    ['mobility', 'Mobility & langer Spaziergang', 45, 'locker', '15′ Hüft- und Sprunggelenk-Mobility, 3×10 Glute Bridges, 3×30" Copenhagen Plank je Seite, danach 30′ Spaziergang.'],
+    ['strength', 'Kraft Beine & Rumpf', 50, 'mittel', 'Kniebeuge 3×5 @ 85 kg, Rumänisches Kreuzheben 3×8 @ 72.5 kg, Nordic Curls 3×7, Copenhagen Plank 2×35 s.', 'Danach Protein + Kohlenhydrate, z.B. Quark mit Haferflocken und Beeren.'],
+    ['football', 'Mannschaftstraining', 90, 'mittel', 'Fester Termin. Im Aufwärmen 4 Steigerungsläufe über 60 m.', '2–3 h vorher normale, kohlenhydratbetonte Mahlzeit; danach innerhalb von 1–2 h Protein essen.'],
+    ['run', 'Intervalle 6×800 m', 55, 'hart', '15′ einlaufen, 6×800 m @ 4:05/km mit 2′ Trabpause, 10′ auslaufen.', 'Vorher leicht verdauliche Kohlenhydrate, wenig Fett und Ballaststoffe (z.B. Banane, Toast mit Honig).'],
+    ['football', 'Mannschaftstraining', 90, 'mittel', 'Fester Termin. Nach dem Training 3×5 Nordic Hamstring Curls.', 'Genug trinken über den Tag; nach dem Training Protein + Kohlenhydrate.'],
+    ['rest', 'Ruhetag vor dem Match', 0, 'Ruhe', 'Spaziergang, früh schlafen.', 'Kohlenhydratspeicher füllen: Pasta, Reis, Kartoffeln zu jeder Mahlzeit, am Abend wenig Fett und Ballaststoffe.'],
+    ['football', 'Match', 90, 'hart', 'Dynamisches Aufwärmen 20′. Nach dem Spiel 10′ auslaufen.', '3–4 h vor Anpfiff kohlenhydratreiche Mahlzeit, in der Halbzeit etwas Schnelles (Banane, Sportgetränk), danach Protein + Kohlenhydrate.'],
+    ['mobility', 'Mobility & langer Spaziergang', 45, 'locker', '15′ Hüft- und Sprunggelenk-Mobility, 3×10 Glute Bridges, danach 30′ Spaziergang.', 'Regenerationstag: ausgewogen essen, Protein auf alle Mahlzeiten verteilen.'],
   ];
   const plan = Array.from({ length: 7 }, (_, i) => {
     const date = addDays(today, i);
-    const [type, title, durationMin, intensity, details] = week[(parseDay(date).getDay() + 6) % 7];
-    return { date, type, title, durationMin, intensity, details };
+    const [type, title, durationMin, intensity, details, nutrition] = week[(parseDay(date).getDay() + 6) % 7];
+    return { date, type, title, durationMin, intensity, details, nutrition };
   });
 
   return {
@@ -117,8 +131,16 @@ export function demoData() {
     manual: { activities: manualActs.reverse(), annotations: {} },
     profile: {
       name: '', age: 28, position: 'Zentrales Mittelfeld', level: 'Amateur (4. Liga)',
-      trainingDays: 5, goals: '10 km unter 42 Minuten laufen und im Match bis zur 90. Minute pressen können.',
-      raceGoal: '10 km in 41:59', injuries: 'Leichte Achillessehnen-Reizung rechts im Frühling', maxHr: 194,
+      trainingDays: 5, weightKg: 74, injuries: 'Leichte Achillessehnen-Reizung rechts im Frühling', maxHr: 194,
+      sports: ['run', 'football', 'strength', 'mobility'],
+      schedule: 'Training Di + Do 19:30, Match Sa',
+      goals: {
+        main: 'endurance', secondary: ['match_fitness', 'injury_prevention'], phase: 'season',
+        targets: [{ text: '10 km unter 42:00', date: '' }, { text: 'Kniebeuge 3×5 mit 90 kg', date: '' }],
+        notes: 'Im Match bis zur 90. Minute pressen können.',
+      },
+      nutrition: { enabled: true, diet: 'Alles', intolerances: '' },
+      customExercises: [],
     },
     insights: {
       generatedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
@@ -128,19 +150,28 @@ export function demoData() {
         summary: 'Deine Form zeigt klar nach oben: Die Pace deiner lockeren Läufe ist in 12 Wochen um rund 15 s/km schneller geworden – bei gleichem Puls. Mit drei Läufen, zwei Trainings und einem Match pro Woche liegst du an der oberen Grenze dessen, was du gut verkraftest. HRV und Ruhepuls sind stabil, du bist bereit für eine harte Einheit.',
         readiness: { score: 78, label: 'Bereit für Tempo', reasoning: 'HRV über deinem 3-Wochen-Schnitt (66 vs. 62 ms), Ruhepuls bei 49, Schlaf 7.4 h. Die letzte harte Belastung (Match) liegt 3 Tage zurück.' },
         load: { status: 'optimal', comment: 'ACWR 1.13 – du steigerst dich kontrolliert. Halte den Wochenumfang diese Woche konstant, bevor du den langen Lauf weiter verlängerst.' },
-        running: [
+        focus: [{ area: '🏃 Ausdauer', tips: [
           { title: 'Ein Qualitätslauf pro Woche reicht', detail: 'Neben zwei Fussballtrainings ist ein harter Lauf (Intervalle oder Schwelle) optimal. Dein Tempolauf am Donnerstag kollidiert mit dem Training – verschiebe ihn auf Mittwoch.', priority: 'hoch' },
           { title: 'Schwellentempo bei 4:28/km', detail: 'Deine Laktatschwelle liegt bei 171 bpm bzw. 4:28/km. 3×10\' in diesem Bereich bauen genau die Ausdauer für die 10 km unter 42 Minuten auf.', priority: 'mittel' },
           { title: 'Lockere Läufe wirklich locker', detail: 'Dein Ø-Puls bei lockeren Läufen liegt bei 146 bpm – Ziel: unter 145. Das spart Energie für die harten Tage.', priority: 'niedrig' },
-        ],
-        football: [
+        ] }, { area: '⚽ Matchfitness', tips: [
           { title: 'Wiederholungssprints einbauen', detail: '1×/Woche 2 Serien à 6×30 m Sprint mit 20" Pause. Das trainiert genau die Belastung im Pressing in der Schlussphase.', priority: 'hoch' },
           { title: 'Nordic Curls gegen Zerrungen', detail: '2×/Woche 3×5 Nordic Hamstring Curls senkt das Risiko für Oberschenkelzerrungen nachweislich – ideal nach dem Training.', priority: 'mittel' },
-        ],
-        recovery: [
+        ] }, { area: '🏋️ Kraft & Prävention', tips: [
+          { title: 'Kniebeuge weiter steigern', detail: 'Deine Kniebeuge ist in 12 Wochen von 70 auf 85 kg (3×5) gestiegen. Erhöhe um 2.5 kg pro Woche, solange alle Wiederholungen sauber gelingen – das Ziel 90 kg ist in 2–3 Wochen realistisch.', priority: 'mittel' },
+          { title: 'Kraft nicht vor Matchtagen', detail: 'Krafttraining früh in der Woche passt gut: genug Abstand zum Match am Samstag. Nie innerhalb von 48 h vor einem Match schwer trainieren.', priority: 'niedrig' },
+        ] }, { area: '😴 Erholung', tips: [
           { title: 'Schlaf vor Matchtagen', detail: 'Vor deinen letzten zwei Matches hast du unter 7 h geschlafen. Plane am Freitag bewusst 8 h ein.', priority: 'mittel' },
           { title: 'Achillessehne im Blick behalten', detail: 'Wadenheben exzentrisch 3×15 an 3 Tagen pro Woche. Bei Schmerzen am Morgen das Lauftempo reduzieren und ärztlich abklären lassen.', priority: 'niedrig' },
-        ],
+        ] }],
+        nutrition: {
+          summary: 'Du trainierst fast täglich – Kohlenhydrate sind dein wichtigster Treibstoff, Protein hilft bei der Regeneration.',
+          tips: [
+            { title: 'Matchtag-Fahrplan', detail: 'Am Vortag und 3–4 h vor dem Anpfiff kohlenhydratreich essen (Pasta, Reis, Brot), wenig Fett und Ballaststoffe. In der Halbzeit etwas Schnelles wie eine Banane.', priority: 'hoch' },
+            { title: 'Protein über den Tag verteilen', detail: 'Bei jeder Hauptmahlzeit eine Proteinquelle (Milchprodukte, Eier, Fleisch, Fisch, Hülsenfrüchte) – besonders in den 1–2 h nach dem Training.', priority: 'mittel' },
+            { title: 'Trinken nicht vergessen', detail: 'Schon vor dem Training gut hydriert sein; bei Einheiten über 60 Minuten oder bei Hitze unterwegs trinken.', priority: 'niedrig' },
+          ],
+        },
         warnings: [],
         plan,
         answer: '',

@@ -5,6 +5,10 @@ import {
 } from './util.js';
 import * as store from './store.js';
 import { bars, line, sparkline, ring, hbars, legend } from './charts.js';
+import {
+  MUSCLE_GROUPS, FOCUS, PHASES, DIETS, catalog, normalizeProfile, bestE1rm, volume, fmtSets,
+  lastSession, setRow, exerciseBlock, readExercises, slug,
+} from './training.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -17,7 +21,8 @@ const state = {
   actFilter: 'all',
   actQuery: '',
   trendWeeks: 12,
-  coachTab: 'running',
+  coachTab: 0,
+  trendExercise: null,
   pending: null, // { kind: 'coach' | 'sync', question?, since }
 };
 
@@ -32,6 +37,13 @@ const SPORT_LABELS = Object.fromEntries(Object.entries(SPORTS).map(([k, v]) => [
 const ZONE_COLORS = ['#86b6ef', '#5598e7', '#2a78d6', '#1c5cab', '#104281'];
 const STATUS_TEXT = { hoch: 'Hoch', mittel: 'Mittel', niedrig: 'Niedrig' };
 
+/** Tip areas of an analysis: new format `focus: [{area, tips}]`, older analyses had fixed keys. */
+function focusAreas(an) {
+  if (an?.focus?.length) return an.focus;
+  return [['running', '🏃 Laufen'], ['football', '⚽ Fussball'], ['recovery', '😴 Erholung']]
+    .filter(([k]) => an?.[k]?.length).map(([k, area]) => ({ area, tips: an[k] }));
+}
+
 // ───────────────────────── derived data ─────────────────────────
 function activities() {
   const { garmin = {}, manual = {} } = state.data;
@@ -42,7 +54,7 @@ function activities() {
 }
 const daily = () => [...(state.data.garmin?.daily || [])].sort((a, b) => a.date.localeCompare(b.date));
 const analysis = () => state.data.insights?.analysis;
-const profile = () => state.data?.profile || {};
+const profile = () => normalizeProfile(state.data?.profile || {});
 const snapshot = () => state.data.garmin?.snapshot || {};
 
 function actTitle(a) {
@@ -98,6 +110,8 @@ function actRow(a) {
     a.distanceKm && `${fmtNum(a.distanceKm, 1)} km`,
     a.paceSecPerKm && `${fmtPace(a.paceSecPerKm)} /km`,
     a.avgHr && `${a.avgHr} bpm`,
+    a.exercises?.length && `${a.exercises.length} Übung${a.exercises.length > 1 ? 'en' : ''}`,
+    volume(a.exercises) && `${fmtNum(volume(a.exercises))} kg`,
     a.football?.kind === 'match' && a.football.result,
   ].filter(Boolean);
   const time = a.start?.length > 10 ? ` · ${a.start.slice(11, 16)}` : '';
@@ -130,6 +144,7 @@ function planCard(p) {
     <h3>${esc(p.title)}</h3>
     <div class="plan-meta">${p.durationMin ? `<span>${icon('clock', 14)}${fmtDur(p.durationMin)}</span>` : ''}<span class="intensity i-${esc(p.intensity)}">${esc(p.intensity)}</span></div>
     <p>${esc(p.details)}</p>
+    ${p.nutrition ? `<p class="plan-food">🍽️ ${esc(p.nutrition)}</p>` : ''}
   </article>`;
 }
 
@@ -224,7 +239,7 @@ function renderToday() {
     <header class="card-head"><h2>${icon('sparkles', 18)} Coach</h2><span class="muted small">${esc(relTime(state.data.insights.generatedAt))}</span></header>
     <p class="lead">${esc(an.summary)}</p>
     ${(an.warnings || []).map((w) => `<p class="warn">${icon('alert', 16)}${esc(w)}</p>`).join('')}
-    <ul class="mini-tips">${[...(an.running || []), ...(an.football || [])].filter((t) => t.priority === 'hoch').slice(0, 3)
+    <ul class="mini-tips">${focusAreas(an).flatMap((f) => f.tips).filter((t) => t.priority === 'hoch').slice(0, 3)
       .map((t) => `<li><strong>${esc(t.title)}</strong></li>`).join('')}</ul>
     <a class="link" href="#/coach">Ganze Analyse ${icon('chevron', 14)}</a>
   </article>` : `<article class="card coach-brief">${emptyState('Noch keine Coach-Analyse', 'Starte die erste Analyse – Claude wertet dann alle Trainings und Gesundheitsdaten aus.', '<button class="btn btn-primary" data-action="analyze">Analyse starten</button>')}</article>`;
@@ -325,6 +340,18 @@ function openActivity(id) {
     ['Gegner', f.opponent], ['Resultat', f.result], ['Spielminuten', f.minutesPlayed],
     ['Tore', f.goals], ['Assists', f.assists],
   ].filter(([, v]) => v || v === 0) : [];
+  const earlier = activities().filter((x) => (x.start || x.date) < (a.start || a.date));
+  const exercisesHtml = a.exercises?.length ? `<h3 class="sub">Übungen</h3><div class="ex-summary">${a.exercises.map((e) => {
+    const best = bestE1rm(e);
+    const previous = earlier.flatMap((x) => (x.exercises || []).filter((y) => y.id === e.id)).map(bestE1rm).filter(Boolean);
+    const record = best && previous.length && best > Math.max(...previous);
+    return `<div class="ex-line">
+      <div><strong>${esc(e.name)}</strong>${record ? ' <span class="chip good">🏆 Rekord</span>' : ''}</div>
+      <span>${esc(fmtSets(e.sets, e.unit))}</span>
+      ${best ? `<span class="muted small">≈ 1RM ${fmtNum(best)} kg</span>` : ''}
+    </div>`;
+  }).join('')}</div>` : '';
+  if (volume(a.exercises)) stats.push(['Volumen', `${fmtNum(volume(a.exercises))} kg`]);
   const zones = a.hrZonesMin?.some(Boolean) ? hbars(a.hrZonesMin.map((m, i) => ({
     label: `Zone ${i + 1}`, value: m || 0, display: fmtDur(m), color: ZONE_COLORS[i],
   }))) : '';
@@ -336,11 +363,12 @@ function openActivity(id) {
       <button class="icon-btn" data-action="close-sheet" aria-label="Schliessen">${icon('close')}</button>
     </header>
     <dl class="stat-grid">${[...stats, ...footballStats].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+    ${exercisesHtml}
     ${zones ? `<h3 class="sub">Herzfrequenzzonen</h3>${zones}` : ''}
     ${a.notes ? `<h3 class="sub">Notizen</h3><p>${esc(a.notes)}</p>` : ''}
     <footer class="sheet-actions">
       ${a.source === 'garmin'
-        ? `<button class="btn" data-action="edit-activity" data-id="${esc(a.id)}">${icon('edit', 16)}Ergänzen (RPE, Notizen, Sportart)</button>`
+        ? `<button class="btn" data-action="edit-activity" data-id="${esc(a.id)}">${icon('edit', 16)}Ergänzen (Übungen, RPE, Notizen)</button>`
         : `<button class="btn btn-danger" data-action="delete-activity" data-id="${esc(a.id)}">${icon('trash', 16)}Löschen</button>
            <button class="btn btn-primary" data-action="edit-activity" data-id="${esc(a.id)}">${icon('edit', 16)}Bearbeiten</button>`}
     </footer>
@@ -354,6 +382,10 @@ function openForm(existing) {
   const now = new Date();
   const time = a.start?.slice(11, 16) || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
   const heading = { new: 'Training erfassen', edit: 'Training bearbeiten', garmin: 'Garmin-Aktivität ergänzen' }[mode];
+  const p = profile();
+  const active = p.sports?.length ? p.sports : Object.keys(SPORTS);
+  const types = Object.keys(SPORTS).filter((k) => active.includes(k) || k === 'other' || k === a.type);
+  const all = activities();
 
   openSheet(`<form id="act-form" class="sheet-body form" data-mode="${mode}" data-id="${esc(a.id || '')}" novalidate>
     <header class="sheet-head">
@@ -363,7 +395,7 @@ function openForm(existing) {
 
     <fieldset class="type-picker">
       <legend>Sportart</legend>
-      ${Object.entries(SPORTS).map(([k, s]) => `<label style="--c:${sportColor(k)}"><input type="radio" name="type" value="${k}" ${a.type === k ? 'checked' : ''}><span>${s.emoji}</span>${esc(s.label)}</label>`).join('')}
+      ${types.map((k) => `<label style="--c:${sportColor(k)}"><input type="radio" name="type" value="${k}" ${a.type === k ? 'checked' : ''}><span>${SPORTS[k].emoji}</span>${esc(SPORTS[k].label)}</label>`).join('')}
     </fieldset>
 
     <label class="field"><span>Titel <em>optional</em></span><input name="title" value="${esc(a.title || '')}" placeholder="z.B. Abschlusstraining, Intervalle 6×800 m" maxlength="80"></label>
@@ -393,6 +425,17 @@ function openForm(existing) {
         <label class="field"><span>Tore</span><input type="number" name="goals" inputmode="numeric" min="0" max="20" value="${esc(f.goals ?? '')}"></label>
         <label class="field"><span>Assists</span><input type="number" name="assists" inputmode="numeric" min="0" max="20" value="${esc(f.assists ?? '')}"></label>
       </div>
+    </fieldset>
+
+    <fieldset class="strength-fields">
+      <legend>Übungen</legend>
+      <div class="ex-list">${(a.exercises || []).map((e) => exerciseBlock(e, lastSession(all, e.id, a.id))).join('')}</div>
+      <div class="ex-add">
+        <input id="ex-search" list="ex-options" placeholder="Übung suchen oder neue eintippen …" autocomplete="off" enterkeyhint="done">
+        <datalist id="ex-options">${catalog(p).map((e) => `<option value="${esc(e.name)}">${esc(e.group)}</option>`).join('')}</datalist>
+        <button type="button" class="btn" data-action="ex-add">${icon('plus', 16)}Hinzufügen</button>
+      </div>
+      <p class="muted small">Gewicht leer lassen = Körpergewicht. Neue Übungen landen automatisch in deiner Liste (Einstellungen → Übungen).</p>
     </fieldset>
 
     <label class="field">
@@ -434,6 +477,9 @@ async function submitActivity(form) {
     notes: fd.get('notes').trim() || undefined,
     football,
   };
+  const exercises = type === 'strength' ? readExercises(form) : [];
+  if (exercises.length) common.exercises = exercises;
+  const newExercises = JSON.parse(form.dataset.newExercises || '[]').filter((n) => exercises.some((e) => e.id === n.id));
 
   const submit = form.querySelector('[type=submit]');
   submit.disabled = true;
@@ -441,8 +487,12 @@ async function submitActivity(form) {
     if (mode === 'garmin') {
       await store.saveAnnotation(form.dataset.id, JSON.parse(JSON.stringify(common)));
     } else {
-      if (!fd.get('date') || !num('durationMin')) {
-        toast('Bitte Datum und Dauer angeben.', 'error');
+      const missing = [['date', 'Datum'], ['durationMin', 'Dauer']].filter(([k]) => !fd.get(k) || (k === 'durationMin' && !num(k)));
+      if (missing.length) {
+        missing.forEach(([k]) => form.elements[k].setAttribute('aria-invalid', 'true'));
+        form.elements[missing[0][0]].focus();
+        form.elements[missing[0][0]].scrollIntoView({ block: 'center', behavior: 'smooth' });
+        toast(`Bitte ${missing.map(([, label]) => label).join(' und ')} angeben.`, 'error');
         submit.disabled = false;
         return;
       }
@@ -458,6 +508,13 @@ async function submitActivity(form) {
       }));
       if (activity.type === 'run' && activity.distanceKm) activity.paceSecPerKm = Math.round((activity.durationMin * 60) / activity.distanceKm);
       await store.saveActivity(activity);
+    }
+    if (newExercises.length) {
+      await store.updateProfile((raw) => {
+        const prof = normalizeProfile(raw);
+        prof.customExercises = [...prof.customExercises, ...newExercises.filter((n) => !prof.customExercises.some((c) => c.id === n.id))];
+        return prof;
+      });
     }
     sheet.close();
     toast(mode === 'new' ? 'Training gespeichert' : 'Änderungen gespeichert');
@@ -493,7 +550,8 @@ function renderCoach() {
       ${ask}`;
   }
 
-  const tabs = [['running', '🏃 Laufen'], ['football', '⚽ Fussball'], ['recovery', '😴 Erholung']];
+  const areas = focusAreas(an);
+  const tab = Math.min(state.coachTab, Math.max(0, areas.length - 1));
   const loadStatus = an.load?.status || '';
   const loadClass = { 'zu niedrig': 'warn', aufbauend: 'good', optimal: 'good', hoch: 'warn', 'zu hoch': 'bad' }[loadStatus] || '';
 
@@ -514,9 +572,15 @@ function renderCoach() {
       ${(an.warnings || []).map((w) => `<p class="warn">${icon('alert', 16)}${esc(w)}</p>`).join('')}
     </article>
     <article class="card">
-      <div class="segmented tabs" role="tablist">${tabs.map(([k, label]) => `<button role="tab" aria-selected="${state.coachTab === k}" data-action="coach-tab" data-tab="${k}">${label}</button>`).join('')}</div>
-      <div class="tab-panel" role="tabpanel">${tipList(an[state.coachTab])}</div>
+      <div class="segmented tabs" role="tablist">${areas.map((f, i) => `<button role="tab" aria-selected="${tab === i}" data-action="coach-tab" data-tab="${i}">${esc(f.area)}</button>`).join('')}</div>
+      <div class="tab-panel" role="tabpanel">${tipList(areas[tab]?.tips)}</div>
     </article>
+    ${an.nutrition ? `<article class="card">
+      <header class="card-head"><h2>🍽️ Ernährung</h2><span class="muted small">Faustregeln</span></header>
+      ${an.nutrition.summary ? `<p class="lead">${esc(an.nutrition.summary)}</p>` : ''}
+      <div style="margin-top:12px">${tipList(an.nutrition.tips)}</div>
+      <p class="muted small" style="margin-top:12px">Allgemeine Empfehlungen auf Basis von Sporternährungs-Leitlinien (ACSM, ISSN, UEFA) – keine medizinische oder ernährungstherapeutische Beratung.</p>
+    </article>` : ''}
     <section>
       <header class="section-head"><h2>Deine nächsten 7 Tage</h2><span class="muted small">Vorschlag vom Coach</span></header>
       <div class="plan-list">${(an.plan || []).map(planCard).join('')}</div>
@@ -621,6 +685,7 @@ function renderTrends() {
         <header class="card-head"><h2>Verteilung</h2><span class="muted small">Trainingszeit im Zeitraum</span></header>
         ${dist.length ? hbars(dist) : '<p class="muted">Keine Aktivitäten im Zeitraum.</p>'}
       </article>
+      ${strengthTrends(acts, ms, xLabels)}
       ${races || snap.lactateThreshold || snap.vo2max ? `<article class="card">
         <header class="card-head"><h2>Leistungswerte</h2><span class="muted small">Garmin</span></header>
         <dl class="stat-grid">
@@ -630,6 +695,43 @@ function renderTrends() {
         </dl>
       </article>` : ''}
     </section>`;
+}
+
+function strengthTrends(acts, ms, xLabels) {
+  const sessions = acts.filter((a) => a.exercises?.length).reverse(); // oldest first
+  if (!sessions.length) return '';
+  const counts = new Map();
+  for (const a of sessions) for (const e of a.exercises) counts.set(e.id, { name: e.name, unit: e.unit, n: (counts.get(e.id)?.n || 0) + 1 });
+  const options = [...counts].sort((x, y) => y[1].n - x[1].n);
+  if (!counts.has(state.trendExercise)) state.trendExercise = options[0][0];
+  const current = counts.get(state.trendExercise);
+
+  const points = sessions.flatMap((a) => {
+    const e = a.exercises.find((x) => x.id === state.trendExercise);
+    if (!e) return [];
+    const best = bestE1rm(e);
+    const y = best ?? Math.max(...e.sets.map((s) => s.reps || 0));
+    return [{ x: ms(a.date), y, date: a.date, tip: `<b>${esc(fmtDate(a.date))}</b><br>${esc(fmtSets(e.sets, e.unit))}${best ? `<br>≈ 1RM ${fmtNum(best)} kg` : ''}` }];
+  });
+  const weighted = points.length && sessions.some((a) => a.exercises.some((e) => e.id === state.trendExercise && bestE1rm(e)));
+  const unit = weighted ? 'kg' : current.unit === 's' ? 's' : 'Wdh.';
+
+  const perGroup = {};
+  for (const a of sessions) for (const e of a.exercises) perGroup[e.group || 'Eigene'] = (perGroup[e.group || 'Eigene'] || 0) + e.sets.length;
+  const groups = Object.entries(perGroup).sort((x, y) => y[1] - x[1])
+    .map(([g, n]) => ({ label: g, value: n, display: `${n} ${n === 1 ? 'Satz' : 'Sätze'}`, color: 'var(--s-strength)' }));
+
+  return `<article class="card">
+      <header class="card-head"><h2>Kraft-Fortschritt</h2>
+        <select id="trend-ex" class="mini-select" aria-label="Übung wählen">${options.map(([id, o]) => `<option value="${esc(id)}" ${id === state.trendExercise ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>
+      </header>
+      ${line(points, { color: 'var(--s-strength)', yFormat: (v) => `${fmtNum(v)}`, xLabels: xLabels(points.map((p) => p.date)) })}
+      <p class="muted small" style="margin-top:8px">${weighted ? 'Geschätztes Maximalgewicht (1RM, Epley-Formel) pro Training in kg' : `Beste Leistung pro Training in ${unit}`}</p>
+    </article>
+    <article class="card">
+      <header class="card-head"><h2>Sätze pro Muskelgruppe</h2><span class="muted small">im Zeitraum</span></header>
+      ${hbars(groups)}
+    </article>`;
 }
 
 // ───────────────────────── page: settings ─────────────────────────
@@ -667,6 +769,7 @@ function renderSettings() {
           <div class="row">
             <label class="field grow"><span>Name</span><input name="name" value="${esc(p.name || '')}"></label>
             <label class="field"><span>Alter</span><input name="age" type="number" inputmode="numeric" value="${esc(p.age ?? '')}"></label>
+            <label class="field"><span>Gewicht (kg)</span><input name="weightKg" type="number" inputmode="decimal" step="0.1" value="${esc(p.weightKg ?? '')}"></label>
             <label class="field"><span>Max. Puls</span><input name="maxHr" type="number" inputmode="numeric" value="${esc(p.maxHr ?? '')}"></label>
           </div>
           <div class="row">
@@ -676,13 +779,19 @@ function renderSettings() {
             <label class="field grow"><span>Niveau / Liga</span><input name="level" value="${esc(p.level || '')}" placeholder="z.B. 4. Liga"></label>
             <label class="field"><span>Tage/Woche</span><input name="trainingDays" type="number" min="1" max="7" value="${esc(p.trainingDays ?? '')}"></label>
           </div>
-          <label class="field"><span>Ziele</span><textarea name="goals" rows="2" placeholder="z.B. 10 km unter 45 min, 90 Minuten durchpressen">${esc(p.goals || '')}</textarea></label>
-          <label class="field"><span>Wettkampfziel Laufen</span><input name="raceGoal" value="${esc(p.raceGoal || '')}" placeholder="z.B. Zürich Marathon Halbmarathon, April"></label>
+          <fieldset class="type-picker">
+            <legend>Deine Sportarten <em class="muted">(steuert Auswahl beim Erfassen und den Coach)</em></legend>
+            ${Object.keys(SPORTS).filter((k) => k !== 'other').map((k) => `<label style="--c:${sportColor(k)}"><input type="checkbox" name="sports" value="${k}" ${!p.sports?.length || p.sports.includes(k) ? 'checked' : ''}><span>${SPORTS[k].emoji}</span>${esc(SPORTS[k].label)}</label>`).join('')}
+          </fieldset>
           <label class="field"><span>Verletzungen / Einschränkungen</span><textarea name="injuries" rows="2">${esc(p.injuries || '')}</textarea></label>
           <label class="field"><span>Feste Termine</span><input name="schedule" value="${esc(p.schedule || '')}" placeholder="z.B. Training Di + Do 19:30, Match Sa"></label>
           <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check', 16)}Profil speichern</button></div>
         </form>
       </article>
+
+      ${goalsCard(p)}
+      ${nutritionCard(p)}
+      ${exercisesCard(p)}
 
       <article class="card">
         <header class="card-head"><h2>${icon('sparkles', 18)} Automatisierung</h2></header>
@@ -709,6 +818,130 @@ function renderSettings() {
     </section>`;
 }
 
+function targetRow(t = {}) {
+  return `<div class="row target-row">
+    <label class="field grow"><span>Ziel</span><input name="targetText" value="${esc(t.text || '')}" placeholder="z.B. 10 km unter 42:00 · Kniebeuge 100 kg"></label>
+    <label class="field"><span>Bis</span><input name="targetDate" type="date" value="${esc(t.date || '')}"></label>
+    <button type="button" class="icon-btn" data-action="remove-target" aria-label="Ziel entfernen">${icon('trash', 16)}</button>
+  </div>`;
+}
+
+function goalsCard(p) {
+  const g = p.goals;
+  return `<article class="card">
+    <header class="card-head"><h2>${icon('target', 18)} Ziele & Schwerpunkt</h2></header>
+    <form id="goals-form" class="form">
+      <label class="field"><span>Hauptziel</span>
+        <select name="main"><option value="">– wählen –</option>${Object.entries(FOCUS).map(([k, l]) => `<option value="${k}" ${g.main === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      </label>
+      <fieldset class="chip-checks">
+        <legend>Weitere Ziele</legend>
+        ${Object.entries(FOCUS).map(([k, l]) => `<label><input type="checkbox" name="secondary" value="${k}" ${g.secondary.includes(k) ? 'checked' : ''}>${esc(l)}</label>`).join('')}
+      </fieldset>
+      <fieldset>
+        <legend>Saisonphase</legend>
+        <div class="segmented">${Object.entries(PHASES).map(([k, l]) => `<label><input type="radio" name="phase" value="${k}" ${g.phase === k ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div>
+      </fieldset>
+      <div class="targets">${(g.targets.length ? g.targets : [{}]).map(targetRow).join('')}</div>
+      <button type="button" class="btn btn-sm add-target" data-action="add-target">${icon('plus', 14)}Messbares Ziel</button>
+      <label class="field"><span>Details & Wünsche</span><textarea name="notes" rows="2" placeholder="z.B. Ich mag keine Bahnintervalle, will bis Saisonstart fitter sein als letztes Jahr">${esc(g.notes)}</textarea></label>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check', 16)}Ziele speichern</button></div>
+    </form>
+  </article>`;
+}
+
+function nutritionCard(p) {
+  const n = p.nutrition;
+  return `<article class="card">
+    <header class="card-head"><h2>🍽️ Ernährung</h2>${n.enabled ? '<span class="chip good">Aktiv</span>' : ''}</header>
+    <form id="nutrition-form" class="form">
+      <label class="switch"><input type="checkbox" name="enabled" ${n.enabled ? 'checked' : ''}><span></span>Ernährungstipps vom Coach (Faustregeln vor/nach Training und Match)</label>
+      <div class="row">
+        <label class="field"><span>Ernährungsform</span><select name="diet">${DIETS.map((d) => `<option ${n.diet === d ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
+        <label class="field grow"><span>Unverträglichkeiten / Allergien</span><input name="intolerances" value="${esc(n.intolerances)}" placeholder="z.B. Laktose, Nüsse"></label>
+      </div>
+      <p class="muted small">Grundlage: Leitlinien von ACSM, ISSN und UEFA zur Sporternährung. Keine medizinische Beratung – bei Allergien oder Erkrankungen Fachperson fragen.</p>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button></div>
+    </form>
+  </article>`;
+}
+
+function exercisesCard(p) {
+  const custom = p.customExercises;
+  return `<article class="card">
+    <header class="card-head"><h2>🏋️ Übungen</h2><span class="muted small">${custom.length} eigene</span></header>
+    ${custom.length ? `<ul class="custom-ex">${custom.map((e) => `<li><span>${esc(e.name)} <span class="muted small">· ${esc(e.group || 'Eigene')}${e.unit === 's' ? ' · Sekunden' : ''}</span></span>
+      <button class="icon-btn sm" data-action="remove-exercise" data-id="${esc(e.id)}" aria-label="${esc(e.name)} entfernen">${icon('trash', 16)}</button></li>`).join('')}</ul>` : '<p class="muted small">Noch keine eigenen Übungen. Du kannst sie hier oder direkt beim Erfassen eines Krafttrainings anlegen.</p>'}
+    <form id="exercise-form" class="form" style="margin-top:14px">
+      <div class="row">
+        <label class="field grow"><span>Neue Übung</span><input name="name" placeholder="z.B. Sled Push" required maxlength="60"></label>
+        <label class="field"><span>Gruppe</span><select name="group">${MUSCLE_GROUPS.map((g) => `<option ${g === 'Eigene' ? 'selected' : ''}>${g}</option>`).join('')}</select></label>
+        <label class="field"><span>Messung</span><select name="unit"><option value="">Wiederholungen</option><option value="s">Sekunden</option></select></label>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn">${icon('plus', 16)}Übung hinzufügen</button></div>
+    </form>
+    <details class="builtin-ex"><summary class="muted small">Standardliste anzeigen</summary>
+      ${MUSCLE_GROUPS.filter((g) => g !== 'Eigene').map((g) => `<p class="small"><strong>${g}:</strong> ${catalog({}).filter((e) => e.group === g).map((e) => esc(e.name)).join(', ')}</p>`).join('')}
+    </details>
+  </article>`;
+}
+
+async function saveProfile(mutate, message) {
+  try {
+    const next = await store.updateProfile((raw) => JSON.parse(JSON.stringify(mutate(normalizeProfile(raw)))));
+    state.data.profile = next;
+    toast(message);
+    render();
+  } catch (err) {
+    toast(`Speichern fehlgeschlagen: ${err.message}`, 'error');
+  }
+}
+
+function submitGoals(form) {
+  const fd = new FormData(form);
+  const texts = fd.getAll('targetText');
+  const dates = fd.getAll('targetDate');
+  const goals = {
+    main: fd.get('main') || '',
+    secondary: fd.getAll('secondary').filter((k) => k !== fd.get('main')),
+    phase: fd.get('phase') || '',
+    targets: texts.map((text, i) => ({ text: text.trim(), date: dates[i] || '' })).filter((t) => t.text),
+    notes: fd.get('notes').trim(),
+  };
+  return saveProfile((p) => ({ ...p, goals }), 'Ziele gespeichert – sie fliessen in die nächste Analyse ein');
+}
+
+function submitNutrition(form) {
+  const fd = new FormData(form);
+  const nutrition = { enabled: fd.get('enabled') === 'on', diet: fd.get('diet'), intolerances: fd.get('intolerances').trim() };
+  return saveProfile((p) => ({ ...p, nutrition }), nutrition.enabled ? 'Ernährungstipps aktiviert' : 'Ernährung gespeichert');
+}
+
+function submitExercise(form) {
+  const fd = new FormData(form);
+  const name = fd.get('name').trim();
+  if (!name) return null;
+  if (catalog(profile()).some((e) => e.name.toLowerCase() === name.toLowerCase())) { toast('Diese Übung gibt es schon.', 'error'); return null; }
+  const exercise = { id: `c_${slug(name)}`, name, group: fd.get('group'), ...(fd.get('unit') ? { unit: 's' } : {}) };
+  return saveProfile((p) => ({ ...p, customExercises: [...p.customExercises, exercise] }), `«${name}» hinzugefügt`);
+}
+
+function addExercise() {
+  const input = $('#ex-search');
+  const form = $('#act-form');
+  const name = input.value.trim();
+  if (!name || !form) return;
+  let exercise = catalog(profile()).find((e) => e.name.toLowerCase() === name.toLowerCase());
+  if (!exercise) {
+    exercise = { id: `c_${slug(name)}`, name, group: 'Eigene' };
+    form.dataset.newExercises = JSON.stringify([...JSON.parse(form.dataset.newExercises || '[]'), exercise]);
+  }
+  if ([...form.querySelectorAll('.ex-block')].some((b) => b.dataset.exId === exercise.id)) { toast('Diese Übung ist schon drin.'); return; }
+  form.querySelector('.ex-list').insertAdjacentHTML('beforeend', exerciseBlock(exercise, lastSession(activities(), exercise.id, form.dataset.id)));
+  input.value = '';
+  form.querySelector('.ex-block:last-child [data-f=kg]')?.focus();
+}
+
 async function submitConfig(form) {
   const fd = Object.fromEntries(new FormData(form));
   const cfg = {
@@ -727,20 +960,15 @@ async function submitConfig(form) {
   }
 }
 
-async function submitProfile(form) {
-  const fd = Object.fromEntries(new FormData(form));
-  const profileData = {};
-  for (const [k, v] of Object.entries(fd)) {
-    if (String(v).trim() === '') continue;
-    profileData[k] = ['age', 'maxHr', 'trainingDays'].includes(k) ? Number(v) : String(v).trim();
-  }
-  try {
-    await store.saveProfile(profileData);
-    state.data.profile = profileData;
-    toast('Profil gespeichert');
-  } catch (err) {
-    toast(`Speichern fehlgeschlagen: ${err.message}`, 'error');
-  }
+function submitProfile(form) {
+  const fd = new FormData(form);
+  const basics = { sports: fd.getAll('sports') };
+  for (const k of ['name', 'position', 'level', 'injuries', 'schedule']) basics[k] = (fd.get(k) || '').trim() || undefined;
+  for (const k of ['age', 'weightKg', 'maxHr', 'trainingDays']) basics[k] = fd.get(k) ? Number(fd.get(k)) : undefined;
+  return saveProfile((p) => {
+    const { raceGoal, ...rest } = p; // folded into goals.targets by normalizeProfile
+    return { ...rest, ...basics };
+  }, 'Profil gespeichert');
 }
 
 // ───────────────────────── workflows (sync / coach) ─────────────────────────
@@ -892,9 +1120,30 @@ const actions = {
   'close-sheet': () => sheet.close(),
   sync: () => runSync(),
   analyze: () => runCoach('button'),
-  'coach-tab': (el) => { state.coachTab = el.dataset.tab; render(); },
+  'coach-tab': (el) => { state.coachTab = Number(el.dataset.tab); render(); },
   filter: (el) => { state.actFilter = el.dataset.type; render(); },
   'trend-range': (el) => { state.trendWeeks = Number(el.dataset.weeks); render(); },
+  'ex-add': () => addExercise(),
+  'ex-remove': (el) => el.closest('.ex-block').remove(),
+  'set-add': (el) => {
+    const block = el.closest('.ex-block');
+    const rows = block.querySelectorAll('.set-row');
+    const prev = rows[rows.length - 1];
+    const set = prev ? { kg: prev.querySelector('[data-f=kg]').value, reps: prev.querySelector('[data-f=reps]').value } : {};
+    block.querySelector('.sets').insertAdjacentHTML('beforeend', setRow(set, block.dataset.exUnit));
+  },
+  'set-remove': (el) => el.closest('.set-row').remove(),
+  'ex-copy-last': (el) => {
+    const block = el.closest('.ex-block');
+    block.querySelector('.sets').innerHTML = JSON.parse(el.dataset.sets).map((s) => setRow(s, block.dataset.exUnit)).join('');
+  },
+  'add-target': () => $('#goals-form .targets').insertAdjacentHTML('beforeend', targetRow()),
+  'remove-target': (el) => el.closest('.target-row').remove(),
+  'remove-exercise': (el) => {
+    const ex = profile().customExercises.find((e) => e.id === el.dataset.id);
+    if (!ex || !confirm(`«${ex.name}» aus deiner Liste entfernen? Bereits erfasste Trainings bleiben erhalten.`)) return;
+    saveProfile((p) => ({ ...p, customExercises: p.customExercises.filter((e) => e.id !== ex.id) }), `«${ex.name}» entfernt`);
+  },
   theme: (el) => { store.savePrefs({ theme: el.dataset.theme }); applyTheme(); render(); },
   'copy-link': async () => {
     try { await navigator.clipboard.writeText(store.setupLink()); toast('Setup-Link kopiert – nur an dich selbst senden!'); }
@@ -918,6 +1167,9 @@ const forms = {
   'act-form': submitActivity,
   'cfg-form': submitConfig,
   'profile-form': submitProfile,
+  'goals-form': submitGoals,
+  'nutrition-form': submitNutrition,
+  'exercise-form': submitExercise,
   'ask-form': (form) => {
     const q = new FormData(form).get('q').trim();
     if (q) runCoach('question', q);
@@ -932,6 +1184,7 @@ document.addEventListener('submit', (e) => {
   if (forms[e.target.id]) { e.preventDefault(); forms[e.target.id](e.target); }
 });
 document.addEventListener('input', (e) => {
+  if (e.target.getAttribute?.('aria-invalid')) e.target.removeAttribute('aria-invalid');
   if (e.target.id === 'act-search') {
     state.actQuery = e.target.value;
     const pos = e.target.selectionStart;
@@ -947,6 +1200,12 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   if (e.target.dataset.pref) store.savePrefs({ [e.target.dataset.pref]: e.target.checked });
+  if (e.target.id === 'trend-ex') { state.trendExercise = e.target.value; render(); }
+  // picking a suggestion from the exercise list adds it right away
+  if (e.target.id === 'ex-search' && catalog(profile()).some((x) => x.name.toLowerCase() === e.target.value.trim().toLowerCase())) addExercise();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.target.id === 'ex-search' && e.key === 'Enter') { e.preventDefault(); addExercise(); }
 });
 // close the sheet when tapping the backdrop
 sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
