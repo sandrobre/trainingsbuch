@@ -18,6 +18,7 @@ import sys
 from collections import defaultdict
 from datetime import date, timedelta
 from statistics import mean
+from pathlib import Path
 from typing import Any
 
 import anthropic
@@ -114,8 +115,14 @@ def build_schema(nutrition: bool) -> dict:
 FOCUS_LABELS = {
     "endurance": "Ausdauer", "speed": "Schnelligkeit & Sprint", "strength": "Maximalkraft",
     "hypertrophy": "Muskelaufbau", "weight_loss": "Gewicht reduzieren", "injury_prevention": "Verletzungsprävention",
-    "match_fitness": "Matchfitness", "general": "Allgemeine Fitness",
+    "match_fitness": "Matchfitness", "general": "Allgemeine Fitness", "race_time": "Wettkampfzeit Laufen",
+    "mobility": "Beweglichkeit", "swim": "Schwimmen verbessern", "health": "Gesundheit & Wohlbefinden",
+    "consistency": "Regelmässig trainieren",
 }
+WEEKLY_LABELS = {"run": "Läufe", "strength": "Krafteinheiten", "swim": "Schwimmeinheiten", "cycle": "Radeinheiten",
+                 "mobility": "Mobility/Dehnen", "football": "Fussballeinheiten", "walk": "Wanderungen", "hiit": "HIIT-Einheiten"}
+SUPERVISOR = os.environ.get("SUPERVISOR", "on").lower() not in ("off", "0", "false", "no")
+KNOWLEDGE_FILE = Path(__file__).with_name("knowledge.md")
 PHASE_LABELS = {"prep": "Vorbereitung", "season": "Saison", "offseason": "Pause", "none": "keine Saison"}
 
 PRINCIPLES = """Grundsätze:
@@ -128,6 +135,10 @@ PRINCIPLES = """Grundsätze:
 - Der Wochenplan muss zu Trainingstagen, Zielen, Saisonphase und Einschränkungen passen.
 - Gib Intensitäten konkret an (Pace in min/km, Herzfrequenzbereiche, RPE oder kg x Wiederholungen).
 - Bei Schmerzen oder Verletzungsverdacht: zur ärztlichen Abklärung raten, keine Diagnose stellen.
+- Der tägliche Check-in (Energie, Schlaf, Muskeln, Stress je 1-5, 5 = gut; pain 0-10 mit painWhere = Schmerzampel;
+  sick = krank) ist ein wichtiges Signal: Schmerz über 5 oder sick → keine intensive Einheit; mehrere Tage
+  unter 2.5 im Schnitt → Belastung senken, auch wenn die Garmin-Werte gut aussehen.
+- Wochenziele (Einheiten pro Woche) sind Richtwerte des Athleten: plane so, dass sie erreichbar sind, ohne die Erholung zu opfern.
 - Gliedere die Tipps in 2-4 Bereiche ('focus'), passend zu Zielen und Sportarten, den wichtigsten zuerst.
   Erholung/Prävention bekommt einen eigenen Bereich, sofern es etwas Relevantes gibt.
 - Schreibe auf Deutsch in Schweizer Rechtschreibung (ss statt ß), direkt und motivierend, in der Du-Form."""
@@ -169,6 +180,9 @@ def build_system(profile: dict, sports: list[str]) -> str:
         lines.append(f"- Messbares Ziel: {t['text']}" + (f" (bis {t['date']})" if t.get("date") else ""))
     if g.get("notes"):
         lines.append(f"- Details: {g['notes']}")
+    weekly = {k: v for k, v in (profile.get("weekly") or {}).items() if v}
+    if weekly:
+        lines.append("- Wochenziele: " + ", ".join(f"{v} {WEEKLY_LABELS.get(k, k)}" for k, v in weekly.items()))
     goals = "\n".join(lines) or "- Keine Ziele angegeben: leite sinnvolle Schwerpunkte aus den Sportarten und Daten ab."
 
     text = f"""Du bist ein erfahrener Trainer und Sportwissenschaftler für Ausdauer-, Kraft- und Mannschaftssport.
@@ -323,11 +337,13 @@ def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, ques
 
     sections = {
         "heute": f"{iso_today()} ({date.today().strftime('%A')})",
-        "athletenprofil": {k: v for k, v in profile.items() if k not in ("goals", "customExercises", "raceGoal")} or "nicht ausgefüllt",
+        "athletenprofil": {k: v for k, v in profile.items() if k not in ("goals", "customExercises", "raceGoal", "templates")} or "nicht ausgefüllt",
         "kennzahlen": compute_metrics(acts, daily),
         "garminSnapshot": garmin.get("snapshot", {}),
         "aktivitaetenLetzte42Tage": recent_acts,
         "gesundheitLetzte21Tage": recent_daily,
+        "checkinsLetzte14Tage": {d: c for d, c in sorted((manual.get("checkins") or {}).items()) if day_offset(d) < 14} or None,
+        "trainingsvorlagen": [{"name": t.get("name"), "uebungen": [i.get("id") for i in t.get("items", [])]} for t in profile.get("templates") or []] or None,
         "letzteAnalyse": {"datum": previous.get("generatedAt"), "zusammenfassung": last.get("summary"),
                            "plan": last.get("plan")} if last else None,
     }
@@ -336,6 +352,52 @@ def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, ques
     if question:
         prompt += f"\n\nMeine Frage an dich (beantworte sie im Feld 'answer'):\n{question}"
     return prompt
+
+
+def supervise(client: "anthropic.Anthropic", prompt: str, coach_system: str, analysis: dict, schema: dict) -> tuple[dict, dict]:
+    """Second pass: a supervisor checks the coach's analysis against the knowledge base and corrects it if needed."""
+    knowledge = KNOWLEDGE_FILE.read_text(encoding="utf-8") if KNOWLEDGE_FILE.exists() else ""
+    sup_schema = {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["freigegeben", "angepasst"]},
+            "issues": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"rule": {"type": "string", "description": "z.B. T1, S2, Q1"},
+                               "problem": {"type": "string"}, "fix": {"type": "string"}},
+                "required": ["rule", "problem", "fix"], "additionalProperties": False}},
+            "analysis": schema,
+        },
+        "required": ["verdict", "issues", "analysis"],
+        "additionalProperties": False,
+    }
+    system = f"""Du bist der Supervisor-Coach, also der Coach des Coachs: Sportwissenschaftler mit Wissen in Trainingslehre,
+Sportmedizin und Gesundheitswissenschaft. Du prüfst die Analyse eines Coachs, bevor der Athlet sie sieht.
+Deine verbindliche Grundlage ist diese Wissensbasis:
+
+{knowledge}
+
+Auftrag des Coachs (zur Einordnung):
+{coach_system}
+
+Prüfe die Analyse gegen alle Prüfregeln (S, T, Q) und gegen die Daten. Rechne Zahlen nach. Ist alles korrekt,
+gib sie unverändert zurück (verdict 'freigegeben', issues leer). Ist etwas falsch, riskant, ungenau oder widerspricht
+es der Wissensbasis, korrigiere so wenig wie möglich und so viel wie nötig (verdict 'angepasst') und nenne jede
+Änderung in 'issues'. Schweizer Rechtschreibung (ss statt ß), Du-Form."""
+    response = client.beta.messages.create(
+        model=MODEL,
+        max_tokens=16000,
+        system=system,
+        messages=[{"role": "user", "content": prompt + "\n\nANALYSE DES COACHS (JSON):\n" + json.dumps(analysis, ensure_ascii=False)}],
+        output_config={"effort": EFFORT, "format": {"type": "json_schema", "schema": sup_schema}},
+        betas=["server-side-fallback-2026-07-01"],
+        fallbacks="default",
+    )
+    if response.stop_reason in ("refusal", "max_tokens"):
+        raise RuntimeError(f"Supervisor beendet mit {response.stop_reason}")
+    result = json.loads(next(b.text for b in response.content if b.type == "text"))
+    meta = {"verdict": result["verdict"], "issues": result["issues"][:12], "model": response.model}
+    return result["analysis"], meta
 
 
 def main() -> None:
@@ -385,6 +447,15 @@ def main() -> None:
     text = next(b.text for b in response.content if b.type == "text")
     analysis = json.loads(text)
 
+    supervisor = {"verdict": "aus"}
+    if SUPERVISOR:
+        try:
+            analysis, supervisor = supervise(client, prompt, system, analysis, schema)
+            print(f"Supervisor: {supervisor['verdict']} ({len(supervisor['issues'])} Änderungen).")
+        except Exception as err:  # the coach's analysis is still useful without the second check
+            supervisor = {"verdict": "ungeprüft", "error": str(err)[:200]}
+            print(f"Supervisor fehlgeschlagen: {err}")
+
     history = insights.get("history", [])
     if insights.get("analysis"):
         old = insights["analysis"]
@@ -401,6 +472,7 @@ def main() -> None:
         "model": response.model,
         "trigger": trigger,
         "analysis": analysis,
+        "supervisor": supervisor,
         "qa": qa[:30],
         "history": history[:20],
     })

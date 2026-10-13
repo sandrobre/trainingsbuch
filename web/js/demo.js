@@ -28,6 +28,7 @@ export function demoData() {
   const garminActs = [];
   const manualActs = [];
   const daily = [];
+  const checkins = {};
 
   for (let back = 83; back >= 0; back--) {
     const date = addDays(today, -back);
@@ -72,6 +73,13 @@ export function demoData() {
         notes: '',
       });
     }
+    if (dow === 1 && back > 0 && back < 60) {
+      const m = Math.round(jitter(1500 + progress * 300, 150) / 50) * 50;
+      garminActs.push({
+        id: `gdemow${back}`, source: 'garmin', type: 'swim', garminType: 'lap_swimming', title: 'Schwimmen Hallenbad',
+        date, start: `${date}T07:00:00`, distanceKm: m / 1000, durationMin: Math.round((m / 100) * (2.4 - progress * 0.2)), avgHr: Math.round(jitter(132, 5)),
+      });
+    }
     if (dow === 2 && back > 0) {
       garminActs.push({
         id: `gdemos${back}`, source: 'garmin', type: 'strength', garminType: 'strength_training',
@@ -81,6 +89,10 @@ export function demoData() {
       });
     }
 
+    if (back > 0 && back < 21) {
+      const lvl = (v) => Math.max(1, Math.min(5, Math.round(jitter(v, 1))));
+      checkins[date] = { energy: lvl(3.8), sleep: lvl(3.6), muscle: lvl(dow === 6 ? 2.6 : 3.7), stress: lvl(3.4), ...(back === 4 ? { pain: 3, painWhere: 'Achillessehne rechts' } : {}) };
+    }
     const load = back % 7 === 1 ? 1 : 0;
     daily.push({
       date,
@@ -128,7 +140,7 @@ export function demoData() {
         lactateThreshold: { heartRate: 171, paceSecPerKm: 268 },
       },
     },
-    manual: { activities: manualActs.reverse(), annotations: {} },
+    manual: { activities: manualActs.reverse(), annotations: {}, checkins },
     profile: {
       name: '', age: 28, position: 'Zentrales Mittelfeld', level: 'Amateur (4. Liga)',
       trainingDays: 5, weightKg: 74, injuries: 'Leichte Achillessehnen-Reizung rechts im Frühling', maxHr: 194,
@@ -141,11 +153,13 @@ export function demoData() {
       },
       nutrition: { enabled: true, diet: 'Alles', intolerances: '' },
       customExercises: [],
+      weekly: { run: 3, football: 2, strength: 1, mobility: 1 },
     },
     insights: {
       generatedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
       model: 'claude-opus-5-5 (Demo)',
       trigger: 'garmin-sync',
+      supervisor: { verdict: 'angepasst', model: 'claude-opus-5-5 (Demo)', issues: [{ rule: 'T3', problem: 'Zwei harte Einheiten an aufeinanderfolgenden Tagen (Intervalle Mi, Training Do).', fix: 'Intervalle auf 5×800 m reduziert, Do-Training als moderat markiert.' }] },
       analysis: {
         summary: 'Deine Form zeigt klar nach oben: Die Pace deiner lockeren Läufe ist in 12 Wochen um rund 15 s/km schneller geworden – bei gleichem Puls. Mit drei Läufen, zwei Trainings und einem Match pro Woche liegst du an der oberen Grenze dessen, was du gut verkraftest. HRV und Ruhepuls sind stabil, du bist bereit für eine harte Einheit.',
         readiness: { score: 78, label: 'Bereit für Tempo', reasoning: 'HRV über deinem 3-Wochen-Schnitt (66 vs. 62 ms), Ruhepuls bei 49, Schlaf 7.4 h. Die letzte harte Belastung (Match) liegt 3 Tage zurück.' },

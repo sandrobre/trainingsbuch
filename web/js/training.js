@@ -72,6 +72,23 @@ export const FOCUS = {
   injury_prevention: 'Verletzungsprävention',
   match_fitness: 'Matchfitness',
   general: 'Allgemeine Fitness',
+  race_time: 'Wettkampfzeit Laufen',
+  mobility: 'Beweglichkeit',
+  swim: 'Schwimmen verbessern',
+  health: 'Gesundheit & Wohlbefinden',
+  consistency: 'Regelmässig trainieren',
+};
+/** Sports that can have a weekly session target (units per week). */
+export const WEEKLY_SPORTS = ['run', 'strength', 'swim', 'cycle', 'mobility', 'football', 'walk', 'hiit'];
+export const CHECKIN = [
+  ['energy', 'Energie', 'leer', 'voll'],
+  ['sleep', 'Schlaf', 'schlecht', 'sehr gut'],
+  ['muscle', 'Muskeln', 'starker Kater', 'frisch'],
+  ['stress', 'Stress', 'sehr hoch', 'entspannt'],
+];
+export const checkinScore = (c) => {
+  const v = CHECKIN.map(([k]) => c?.[k]).filter((x) => x > 0);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
 };
 export const PHASES = { prep: 'Vorbereitung', season: 'Saison', offseason: 'Pause', none: 'Keine Saison' };
 export const DIETS = ['Alles', 'Vegetarisch', 'Vegan', 'Pescetarisch'];
@@ -87,6 +104,7 @@ export function normalizeProfile(raw = {}) {
   p.nutrition = { enabled: false, diet: 'Alles', intolerances: '', ...(p.nutrition || {}) };
   p.customExercises ??= [];
   p.templates ??= [];
+  p.weekly ??= {};
   return p;
 }
 
@@ -216,7 +234,7 @@ export function suggestNext(t, ex, hist, blocked) {
     return { type: 'time', from, to, text: `Letztes Mal ${fmtSec(from)}. Heute ${fmtSec(to)} (+${inc} s).${to > 180 ? ' Ab etwa 3 Minuten bringt längeres Halten kaum Zusatznutzen – überleg dir eine schwierigere Variante.' : ''}` };
   }
   if (last?.eval && last.startKg) return { type: 'eval', from: last.startKg, to: last.startKg, text: `Startgewicht aus der Einstufung: ${kgf(last.startKg)} kg. Ziel: ${t.repMin} saubere Wiederholungen pro Satz, 2–3 im Tank.` };
-  if (!last) return { type: 'new', text: `Erstes Mal: Wähle ein Gewicht, mit dem du ${t.repMin}–${t.repMax} saubere Wiederholungen schaffst und noch 1–3 im Tank hast.` };
+  if (!last) return { type: 'new', text: `Erstes Mal: Wähle ein Gewicht, mit dem du ${t.repMin === t.repMax ? t.repMin : `${t.repMin}–${t.repMax}`} saubere Wiederholungen schaffst und noch 1–3 im Tank hast.` };
   const ws = last.sets.filter((x) => x.reps > 0);
   const top = Math.max(0, ...ws.map((x) => x.kg || 0));
   const work = top ? ws.filter((x) => (x.kg || 0) >= top) : ws;

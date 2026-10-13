@@ -99,6 +99,12 @@ export function fmtDur(min) {
   if (m < 60) return `${m} min`;
   return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')} h`;
 }
+/** Hours as h:mm, e.g. 8.3 → "8:18". */
+export function fmtHours(h) {
+  if (h == null || Number.isNaN(h)) return '–';
+  const total = Math.round(Math.abs(h) * 60);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
 export function fmtPace(secPerKm) {
   if (!secPerKm) return '–';
   const s = Math.round(secPerKm);
