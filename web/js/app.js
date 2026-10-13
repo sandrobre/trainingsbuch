@@ -286,6 +286,7 @@ function renderToday() {
     ${checkinCard()}
     ${recordsBanner()}
     ${todayCard(acts)}
+    ${readinessCard()}
     ${raceCard(acts)}
     <section class="grid hero">${readiness}${brief}</section>
     ${weeklyCard(acts)}
@@ -514,6 +515,31 @@ function coachToday() {
     return '<p class="muted small">Die Ampel ist eine schnelle Einschätzung der App. Das letzte Wort hat der Coach – starte eine Analyse für seine Einschätzung.</p>';
   }
   return `<p class="coach-word">${icon('sparkles', 14)}<span><strong>Coach (${esc(relTime(ins.generatedAt))}):</strong> ${esc(an.readiness.label || '')}${an.readiness.score != null ? ` · ${an.readiness.score}/100` : ''}. Seine Einschätzung hat Vorrang.</span></p>`;
+}
+
+const READY_FACTORS = [['sleep', 'Schlaf letzte Nacht'], ['recovery', 'Erholungszeit'], ['hrv', 'HRV-Status'], ['load', 'Akute Belastung'], ['sleepHistory', 'Schlaf 3 Nächte'], ['stressHistory', 'Stress 3 Tage']];
+const READY_FEEDBACK = { VERY_GOOD: 'sehr gut', EXCELLENT: 'sehr gut', GOOD: 'gut', MODERATE: 'mittel', FAIR: 'mittel', POOR: 'schwach', VERY_POOR: 'sehr schwach', LOW: 'tief', HIGH: 'hoch', OPTIMAL: 'optimal' };
+const READY_LEVEL = (s) => (s >= 95 ? 'Prime' : s >= 75 ? 'Hoch' : s >= 50 ? 'Mittel' : s >= 25 ? 'Niedrig' : 'Schlecht');
+
+/** Garmin Training Readiness with the six factors behind it. */
+function readinessCard() {
+  const r = snapshot().readiness;
+  if (r?.score == null) return '';
+  const color = r.score >= 75 ? 'var(--good)' : r.score >= 50 ? 'var(--s-run)' : r.score >= 25 ? 'var(--warn)' : 'var(--bad)';
+  const factors = READY_FACTORS.filter(([k]) => r.factors?.[k]);
+  const stale = r.at && r.at.slice(0, 10) !== todayISO();
+  return `<article class="card readiness-card">
+    <div class="rd-head">
+      ${ring(r.score, { size: 96, color, label: READY_LEVEL(r.score) })}
+      <div><p class="eyebrow">Garmin Training Readiness${stale ? ` · ${esc(relDay(r.at.slice(0, 10)))}` : ''}</p>
+        <h2>${esc(READY_LEVEL(r.score))}${r.morningScore != null && r.morningScore !== r.score ? ` <span class="muted small">(Morgen: ${r.morningScore})</span>` : ''}</h2>
+        <p class="muted small">${r.recoveryTimeH ? `Erholungszeit noch ${r.recoveryTimeH} h · ` : ''}Der Wert ändert sich über den Tag – nach einem Training sinkt er.</p></div>
+    </div>
+    ${factors.length ? `<div class="rd-factors">${factors.map(([k, l]) => {
+      const f = r.factors[k];
+      return `<div class="rd-f"><span>${esc(l)}</span><span class="rd-bar"><i style="width:${Math.max(3, Math.min(100, f.pct ?? 0))}%"></i></span><span class="muted small">${esc(READY_FEEDBACK[f.feedback] || (f.feedback || '').toLowerCase().replaceAll('_', ' ') || (f.pct != null ? `${f.pct} %` : ''))}</span></div>`;
+    }).join('')}</div><p class="muted small">Balken = wie stark der Faktor deine Bereitschaft gerade stützt (100 % = voll).</p>` : ''}
+  </article>`;
 }
 
 function todayCard(acts) {
@@ -2039,7 +2065,7 @@ function trendRecords() {
   const ids = new Set(activities().map((a) => a.id));
   const since = addDays(todayISO(), -14);
   const row = (r) => `<li>
-    <div><span>${esc(r.label)}</span>${r.detail ? `<span class="muted small">${esc(r.detail)}</span>` : ''}</div>
+    <div><span>${esc(r.label)}</span>${r.detail || r.activityName ? `<span class="muted small">${esc(r.detail || r.activityName)}</span>` : ''}</div>
     <strong>${esc(fmtRecord(r))}</strong>
     <span class="muted small">${r.date ? esc(fmtDate(r.date, { day: 'numeric', month: 'short', year: '2-digit' })) : ''}${r.date >= since && (!r.own || r.improved) ? ' <span class="chip good">neu</span>' : ''}</span>
     ${r.activityId && ids.has(r.activityId) ? `<button class="icon-btn sm" data-action="open-activity" data-id="${esc(r.activityId)}" aria-label="Aktivität öffnen">${icon('chevron', 16)}</button>` : '<span></span>'}

@@ -170,7 +170,7 @@ export function demoData() {
       activities: garminActs.reverse(),
       daily,
       snapshot: {
-        readiness: { score: 74, level: 'HIGH', feedback: 'Gut erholt', recoveryTimeH: 6 },
+        readiness: { score: 74, level: 'HIGH', feedback: 'Gut erholt', recoveryTimeH: 6, morningScore: 81, at: `${today}T15:00:00`, factors: { sleep: { pct: 78, feedback: 'GOOD' }, recovery: { pct: 64, feedback: 'MODERATE' }, hrv: { pct: 90, feedback: 'GOOD' }, load: { pct: 70, feedback: 'GOOD' }, sleepHistory: { pct: 60, feedback: 'MODERATE' }, stressHistory: { pct: 85, feedback: 'GOOD' } } },
         trainingStatus: { phrase: 'PRODUCTIVE', acuteLoad: 612, chronicLoad: 540, acwr: 1.13 },
         vo2max: 54.6, fitnessAge: 24,
         racePredictions: { '5k': 1238, '10k': 2598, half: 5790, marathon: 12420 },
