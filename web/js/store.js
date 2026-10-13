@@ -228,3 +228,12 @@ export function importSetupFromHash() {
     return false;
   }
 }
+
+/** Generic read-modify-write of manual.json (plan, limits, stretching, weights …). */
+export function updateManual(mutate, message) {
+  return write('manual', mutate, message);
+}
+
+// small per-device storage for drafts (unfinished strength sessions)
+export const localGet = (key, fallback = null) => readLocal(`hf.${key}`, fallback);
+export const localSet = (key, value) => (value == null ? localStorage.removeItem(`hf.${key}`) : writeLocal(`hf.${key}`, value));

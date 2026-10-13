@@ -11,6 +11,11 @@ import {
   exerciseHistory, suggestNext, prefillSets, suggBox, defaultInc, nextTemplate, warmupSets, WARMUP,
   PRESET_TEMPLATES, PRESET_EXERCISES, targetText, WEEKLY_SPORTS, CHECKIN, checkinScore,
 } from './training.js';
+import {
+  LIMIT_KIND, LIMIT_SHORT, AFFECTS, activeLimits, conflicts, templateParts, trafficLight, planItems, planDone,
+  HM_KM, RACE_DISTANCES, raceEstimate, racePhase, weeklyGoalStreak, dayStreak, SWIM, swimById, pickSwim,
+  STRETCH_SUGGESTION, stretchMinutes, startKg, buildIcs,
+} from './planning.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -27,11 +32,18 @@ const state = {
   trendExercise: null,
   trendTab: 'overview',
   ciDraft: null, // check-in being edited on Today
+  planView: 'week',
+  planWeek: null, // Monday of the shown week (null = current)
+  planAdd: null, // day with the open "add session" form
+  planMove: null, // plan item being moved
+  calMonth: null,
+  reviewMonth: null,
   pending: null, // { kind: 'coach' | 'sync', question?, since }
 };
 
 const ROUTES = {
   heute: { title: 'Heute', icon: 'home', render: renderToday },
+  plan: { title: 'Plan', icon: 'calendar', render: renderPlan },
   aktivitaeten: { title: 'Aktivitäten', icon: 'list', render: renderActivities },
   coach: { title: 'Coach', icon: 'sparkles', render: renderCoach },
   trends: { title: 'Trends', icon: 'chart', render: renderTrends },
@@ -166,6 +178,19 @@ const KPIS = [
   { key: 'steps', label: 'Schritte', icon: 'steps', unit: '', better: 'higher' },
 ];
 
+function weightTile() {
+  const w = Object.entries(weightMap()).sort(([a], [b]) => a.localeCompare(b));
+  if (!w.length) return '';
+  const [date, kg] = w.at(-1);
+  const old = w.filter(([d]) => daysBetween(d, date) >= 25).at(-1);
+  return `<article class="kpi">
+    <header>${icon('user', 16)}<span>Gewicht</span>${date === todayISO() ? '' : `<span class="kpi-when">${esc(relDay(date))}</span>`}</header>
+    <div class="kpi-value">${fmtNum(kg, 1)}<small>kg</small></div>
+    ${old ? `<span class="trend">${kg - old[1] > 0 ? '↑' : kg - old[1] < 0 ? '↓' : '→'} ${fmtNum(Math.abs(kg - old[1]), 1)} kg vs. vor 4 Wo.</span>` : ''}
+    ${sparkline(w.slice(-30).map(([, v]) => v), 'var(--accent)')}
+  </article>`;
+}
+
 function kpiTile(k, days) {
   const recent = days.slice(-14);
   const withValue = recent.filter((d) => typeof d[k.key] === 'number');
@@ -257,11 +282,14 @@ function renderToday() {
   return `
     ${pageHead(`${greet}${name ? `, ${esc(name)}` : ''}`, esc(fmtDate(todayISO(), { weekday: 'long', day: 'numeric', month: 'long' })),
       `<button class="btn" data-action="sync">${icon('refresh', 16)}<span>Sync</span></button><button class="btn btn-primary hide-mobile" data-action="add">${icon('plus', 16)}<span>Training</span></button>`)}
-    ${demoBanner()}${pendingBanner()}
+    ${demoBanner()}${pendingBanner()}${draftBanner()}
     ${checkinCard()}
+    ${todayCard(acts)}
+    ${raceCard(acts)}
     <section class="grid hero">${readiness}${brief}</section>
     ${weeklyCard(acts)}
-    <section class="kpis">${KPIS.map((k) => kpiTile(k, days)).join('')}${vo2}</section>
+    ${stretchCard()}
+    <section class="kpis">${KPIS.map((k) => kpiTile(k, days)).join('')}${weightTile()}${vo2}</section>
     ${strengthCard(acts)}
     <section class="grid two">
       ${weekLoadCard(acts)}
@@ -292,7 +320,7 @@ function checkinCard() {
       <div class="ci-summary">
         <span class="ci-score" style="--c:${low ? 'var(--bad)' : score >= 3.5 ? 'var(--good)' : 'var(--warn)'}">${score == null ? '–' : fmtNum(score, 1)}</span>
         <div><p class="eyebrow">Check-in heute ✓</p>
-          <p class="small">${CHECKIN.filter(([k]) => saved[k]).map(([k, l]) => `${esc(l)} ${saved[k]}/5`).join(' · ')}</p>
+          <p class="small">${CHECKIN.filter(([k]) => saved[k]).map(([k, l]) => `${esc(l)} ${saved[k]}/5`).join(' · ')}${manualData().weights?.[today] ? ` · ${fmtNum(manualData().weights[today], 1)} kg` : ''}</p>
           ${saved.pain ? `<p class="small ci-pain p-${PAIN_TEXT(saved.pain)}">${icon('alert', 14)}Schmerz ${saved.pain}/10${saved.painWhere ? ` · ${esc(saved.painWhere)}` : ''}</p>` : ''}
           ${saved.sick ? `<p class="small ci-pain p-rot">${icon('alert', 14)}Krank / Infekt – heute kein intensives Training.</p>` : ''}
           ${low ? '<p class="small muted">Tiefer Wert – heute eher locker oder Ruhetag.</p>' : ''}
@@ -312,6 +340,7 @@ function checkinCard() {
     <div class="ci-extra">
       <label class="field"><span>Schmerz (0–10)</span><select id="ci-pain">${Array.from({ length: 11 }, (_, n) => `<option value="${n}" ${(d.pain || 0) === n ? 'selected' : ''}>${n === 0 ? 'keiner' : n}</option>`).join('')}</select></label>
       <label class="field grow"><span>Wo? <em>optional</em></span><input id="ci-where" value="${esc(d.painWhere || '')}" placeholder="z.B. Knie links, Achillessehne" maxlength="60"></label>
+      <label class="field"><span>Gewicht (kg) <em>optional</em></span><input id="ci-weight" type="number" inputmode="decimal" step="0.1" min="30" max="250" value="${esc(manualData().weights?.[todayISO()] ?? '')}" placeholder="–"></label>
     </div>
     <label class="switch"><input type="checkbox" id="ci-sick" ${d.sick ? 'checked' : ''}><span></span>Krank / Erkältung</label>
     <div class="form-actions">
@@ -330,9 +359,16 @@ async function saveCheckin() {
   if (!CHECKIN.some(([k]) => d[k])) { toast('Bitte mindestens einen Wert antippen.', 'error'); return; }
   d.at = new Date().toISOString();
   const clean = JSON.parse(JSON.stringify(d));
+  const kg = Number($('#ci-weight')?.value) || null;
   try {
-    const manual = await store.saveCheckin(todayISO(), clean);
-    state.data.manual = manual || { ...state.data.manual, checkins: { ...checkins(), [todayISO()]: clean } };
+    const day = todayISO();
+    const manual = await store.updateManual((m) => {
+      m.checkins ??= {};
+      m.checkins[day] = clean;
+      if (kg) { m.weights ??= {}; m.weights[day] = Math.round(kg * 10) / 10; } else if (m.weights) delete m.weights[day];
+      return m;
+    }, `Check-in ${day}`);
+    state.data.manual = manual || { ...state.data.manual, checkins: { ...checkins(), [day]: clean } };
     state.ciDraft = null;
     toast(clean.pain > 5 || clean.sick ? 'Gespeichert – heute bitte schonen.' : 'Check-in gespeichert');
     render();
@@ -348,28 +384,739 @@ function weeklyCard(acts) {
   const wk = weekStart(todayISO());
   const done = (t) => new Set(acts.filter((a) => a.type === t && a.date >= wk && a.date < addDays(wk, 7)).map((a) => a.id)).size;
   const left = 7 - daysBetween(wk, todayISO()) - 1;
-  const items = goals.map(([t, n]) => ({ t, n, d: done(t) }));
+  const items = goals.map(([t, n]) => ({ t, n, d: done(t), label: `${sport(t).emoji} ${sport(t).label}`, color: sportColor(t) }));
   const all = items.every((i) => i.d >= i.n);
+  const stLog = stretchLog();
+  if (stretchItems().length || Object.keys(stLog).length) {
+    items.push({ t: 'stretch', n: 7, d: Array.from({ length: 7 }, (_, i) => addDays(wk, i)).filter((d) => stLog[d]?.complete).length, label: '🧘 Dehnen', color: 'var(--s-mobility)' });
+  }
+  const streak = weeklyGoalStreak(acts, profile().weekly);
+  const stDays = dayStreak((d) => !!stLog[d]?.complete);
+  const ciDays = dayStreak((d) => !!checkins()[d]);
+  const streaks = [
+    streak.current >= 2 && `🔥 ${streak.current} Wochen in Folge alle Ziele${streak.best > streak.current ? ` (Rekord ${streak.best})` : ''}`,
+    stDays >= 3 && `🧘 ${stDays} Tage in Folge gedehnt`,
+    ciDays >= 3 && `✅ ${ciDays} Tage Check-in am Stück`,
+  ].filter(Boolean);
   return `<article class="card weekly">
     <header class="card-head"><h2>Diese Woche</h2><span class="muted small">${all ? '🎉 Alle Wochenziele erreicht' : `noch ${left} Tag${left === 1 ? '' : 'e'}`}</span></header>
-    <div class="week-rings">${items.map(({ t, n, d }) => `<div class="week-ring${d >= n ? ' reached' : ''}">
-      ${ring(Math.min(100, (d / n) * 100), { size: 74, color: sportColor(t), label: '' }).replace(/<strong>.*?<\/strong>/, `<strong>${d}/${n}</strong>`)}
-      <span>${sport(t).emoji} ${esc(sport(t).label)}</span>
+    <div class="week-rings">${items.map(({ n, d, label, color }) => `<div class="week-ring${d >= n ? ' reached' : ''}">
+      ${ring(Math.min(100, (d / n) * 100), { size: 74, color, label: '' }).replace(/<strong>.*?<\/strong>/, `<strong>${d}/${n}</strong>`)}
+      <span>${esc(label)}</span>
     </div>`).join('')}</div>
+    ${streaks.length ? `<p class="streaks">${streaks.map((x) => `<span>${esc(x)}</span>`).join('')}</p>` : ''}
   </article>`;
 }
+
+// ───────────────────────── Etappe 3: shared helpers ─────────────────────────
+const manualData = () => state.data?.manual || {};
+const limitsList = () => manualData().limits || [];
+const newId = (p) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const light = () => trafficLight({ limits: limitsList(), checkins: checkins(), acts: activities(), snapshot: snapshot() });
+const stretchItems = () => profile().stretch || [];
+const stretchLog = () => manualData().stretch || {};
+
+/** Garmin + manual body weight per day. */
+function weightMap() {
+  const out = {};
+  for (const d of daily()) if (d.weightKg) out[d.date] = d.weightKg;
+  return { ...out, ...(manualData().weights || {}) };
+}
+/** Daily health rows with manual weights merged in (also for days without Garmin data). */
+function healthDays() {
+  const w = weightMap();
+  const map = new Map(daily().map((d) => [d.date, { ...d }]));
+  for (const [date, kg] of Object.entries(w)) map.set(date, { ...(map.get(date) || { date }), weightKg: kg });
+  return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function saveManual(mutate, message, ok) {
+  try {
+    const next = await store.updateManual((m) => { mutate(m); return m; }, message);
+    if (next) state.data.manual = next;
+    if (ok) toast(ok);
+    render();
+    return true;
+  } catch (err) {
+    toast(`Speichern fehlgeschlagen: ${err.message}`, 'error');
+    return false;
+  }
+}
+
+function planRange(from, to) {
+  const p = profile();
+  return planItems({ plan: manualData().plan || [], recurring: p.recurring || [], garminPlanned: state.data?.garmin?.planned || [], from, to });
+}
+const findPlanItem = (id) => planRange(addDays(todayISO(), -120), addDays(todayISO(), 180)).find((x) => x.id === id);
+
+/** Change a plan entry; generated entries (fixed / Garmin) get an override entry in manual.plan. */
+function planPatch(it, patch, message, ok) {
+  return saveManual((m) => {
+    m.plan ??= [];
+    if (!it.key) {
+      const i = m.plan.findIndex((x) => x.id === it.id);
+      if (i < 0) return;
+      if (patch.removed && !m.plan[i].recurOf) m.plan.splice(i, 1);
+      else Object.assign(m.plan[i], patch);
+    } else {
+      const { key, src, ...rest } = it;
+      m.plan.push(JSON.parse(JSON.stringify({ ...rest, id: newId('p'), recurOf: key, ...patch })));
+    }
+  }, message, ok);
+}
+
+// ── traffic light + today's sessions ──
+function limitChip(l) {
+  return `<div class="limit">
+    <span class="chip ${l.kind === 'ill' ? 'bad' : 'warn'}">${esc(LIMIT_SHORT[l.kind])}</span>
+    <div><strong>${esc(l.area || '')}</strong>
+      <span class="muted small">seit ${esc(fmtDate(l.from, { day: 'numeric', month: 'short' }))}${l.to ? ` bis ${esc(fmtDate(l.to, { day: 'numeric', month: 'short' }))}` : ''}${l.affects?.length ? ` · betrifft ${esc(l.affects.map((a) => AFFECTS[a]).join(', '))}` : ''}${l.note ? ` · ${esc(l.note)}` : ''}</span></div>
+    <button class="btn btn-sm" data-action="limit-resolve" data-id="${esc(l.id)}">Wieder fit</button>
+  </div>`;
+}
+
+function planRow(it, acts, L, opts = {}) {
+  const p = profile();
+  const done = planDone(it, acts);
+  const conf = conflicts(it, limitsList(), p.templates, catalog(p));
+  const sw = it.sport === 'swim' ? (swimById(it.swimId) || (it.date >= todayISO() ? pickSwim(L.level, acts) : null)) : null;
+  const tpl = it.sport === 'strength' ? p.templates.find((t) => t.id === it.templateId) : null;
+  const badge = { garmin: 'Garmin-Plan', fix: 'Fix' }[it.src];
+  const meta = [it.durationMin && fmtDur(it.durationMin), it.distanceKm && `${fmtNum(it.distanceKm, 1)} km`, it.plan, it.movedFrom ? `verschoben vom ${fmtDate(it.movedFrom, { day: 'numeric', month: 'short' })}` : ''].filter(Boolean);
+  const longRunNext = it.sport === 'strength' && planRange(addDays(it.date, 1), addDays(it.date, 1)).some((x) => x.sport === 'run' && /lang|long|tempo|intervall/i.test(x.title || ''));
+  return `<div class="plan-row${done ? ' done' : ''}" style="--c:${sportColor(it.sport)}">
+    <button class="check" data-action="plan-done" data-id="${esc(it.id)}" aria-pressed="${done}" aria-label="Als erledigt markieren">${icon('check', 15)}</button>
+    <div class="pr-main">
+      <div class="pr-title">${sport(it.sport).emoji} <strong>${esc(it.title || sport(it.sport).label)}</strong>${badge ? ` <span class="chip">${badge}</span>` : ''}${it.race ? ' <span class="chip good">🏁 Wettkampf</span>' : ''}</div>
+      ${meta.length ? `<div class="muted small">${esc(meta.join(' · '))}</div>` : ''}
+      ${it.note ? `<details><summary class="small">Details</summary><p class="small pre">${esc(it.note)}</p></details>` : ''}
+      ${conf.map((l) => `<p class="small warn-text">${icon('alert', 13)} Betroffen: ${esc(LIMIT_SHORT[l.kind])}${l.area ? ` (${esc(l.area)})` : ''} – anpassen oder verschieben</p>`).join('')}
+      ${longRunNext && tpl && templateParts(tpl, catalog(p)).lower ? '<p class="small warn-text">Am Tag vor einem langen oder harten Lauf: Beine leichter oder Tag tauschen.</p>' : ''}
+      ${sw ? `<details class="swim-prog"><summary class="small">🏊 ${esc(sw.name)} · ${fmtNum(sw.m)} m · ${esc(sw.focus)}${it.swimId ? '' : ' (Vorschlag)'}</summary><p class="small pre">${esc(sw.desc)}</p>
+        ${opts.edit !== false ? `<select class="mini-select" data-swim-for="${esc(it.id)}" aria-label="Programm wählen">${SWIM.map((s) => `<option value="${s.id}" ${s.id === sw.id ? 'selected' : ''}>${esc(s.name)} (${s.m} m)</option>`).join('')}</select>` : ''}</details>` : ''}
+      ${!done && (tpl || sw) ? `<div class="pr-start">${tpl ? `<button class="btn btn-sm btn-primary" data-action="tpl-start" data-id="${esc(tpl.id)}">${esc(tpl.name)} starten</button>` : ''}${sw ? `<button class="btn btn-sm" data-action="swim-log" data-swim="${esc(sw.id)}" data-date="${esc(it.date)}">Schwimmen erfassen</button>` : ''}</div>` : ''}
+      ${state.planMove === it.id ? `<div class="move-row"><input type="date" id="move-date" value="${esc(it.date)}" aria-label="Neues Datum"><button class="btn btn-sm btn-primary" data-action="plan-move-ok" data-id="${esc(it.id)}">Verschieben</button><button class="btn btn-sm" data-action="plan-move-cancel">Abbrechen</button></div>` : ''}
+    </div>
+    ${opts.edit !== false ? `<div class="pr-acts">
+      <button class="icon-btn sm" data-action="plan-move" data-id="${esc(it.id)}" aria-label="Verschieben" title="Verschieben">${icon('arrow', 16)}</button>
+      <button class="icon-btn sm" data-action="plan-remove" data-id="${esc(it.id)}" aria-label="Aus dem Plan entfernen" title="Entfernen">${icon('close', 16)}</button>
+    </div>` : ''}
+  </div>`;
+}
+
+function todayCard(acts) {
+  const L = light();
+  const today = todayISO();
+  const items = planRange(today, today);
+  const lims = activeLimits(limitsList());
+  return `<article class="card today-card tl-${L.level}">
+    <header class="tl-head">
+      <span class="tl-lamp" aria-hidden="true"><i></i><i></i><i></i></span>
+      <div><p class="eyebrow">Ampel heute</p><h2>${esc(L.label)}</h2></div>
+      <button class="btn btn-sm" data-action="limit-new">${icon('alert', 14)}<span>Einschränkung melden</span></button>
+    </header>
+    <ul class="tl-reasons">${L.reasons.map((r) => `<li class="l${r.level}">${esc(r.text)}</li>`).join('')}</ul>
+    ${lims.length ? `<div class="limits">${lims.map(limitChip).join('')}</div>` : ''}
+    <header class="card-head sub-head"><h3>Heute geplant</h3><a class="link" href="#/plan">Wochenplan ${icon('chevron', 14)}</a></header>
+    ${items.length ? `<div class="plan-items">${items.map((it) => planRow(it, acts, L)).join('')}</div>`
+      : '<p class="muted small">Nichts geplant – Ruhetag oder freie Wahl.</p>'}
+  </article>`;
+}
+
+// ── stretching (today) ──
+let stretchSaveTimer = null;
+let stretchTimer = null;
+function stretchCard() {
+  const items = stretchItems();
+  const today = todayISO();
+  const log = stretchLog()[today] || { done: [] };
+  const done = new Set(log.done || []);
+  const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart(today), i));
+  const weekDone = week.filter((d) => stretchLog()[d]?.complete).length;
+  const head = `<header class="card-head"><h2>🧘 Dehnen heute</h2><span class="muted small">${log.complete ? 'Erledigt ✓ · ' : items.length ? `${done.size}/${items.length} · ` : ''}${weekDone}/7 diese Woche</span></header>`;
+  if (!items.length) {
+    return `<article class="card stretch-card">${head}
+      <p class="muted small">Noch keine Dehnübungen hinterlegt. Trag deine Übungen unter Einstellungen → Dehnen ein (oder lade dort einen Vorschlag). Bis dahin kannst du die Einheit als Ganzes abhaken.</p>
+      <div class="form-actions"><button class="btn ${log.complete ? 'btn-primary' : ''}" data-action="stretch-day" data-date="${today}">${icon('check', 16)}${log.complete ? 'Heute gedehnt ✓' : 'Heute gedehnt'}</button><a class="btn" href="#/einstellungen">Übungen eintragen</a></div>
+    </article>`;
+  }
+  return `<article class="card stretch-card">${head}
+    <p class="muted small">ca. ${stretchMinutes(items)} Min. · nach dem Training oder am Abend, nicht vor dem Krafttraining</p>
+    <ul class="stretch-list">${items.map((it) => `<li class="${done.has(it.id) ? 'done' : ''}">
+      <button class="check" data-action="stretch-item" data-id="${esc(it.id)}" aria-pressed="${done.has(it.id)}" aria-label="${esc(it.name)} erledigt">${icon('check', 15)}</button>
+      <div><span>${esc(it.name)}</span><span class="muted small">${it.sec || 30} s${it.sides ? ' pro Seite' : ''}${it.note ? ` · ${esc(it.note)}` : ''}</span></div>
+      <button class="btn btn-sm st-timer" data-action="stretch-timer" data-id="${esc(it.id)}" id="stt-${esc(it.id)}">${stretchTimer?.id === it.id ? esc(stretchTimer.label) : 'Start'}</button>
+    </li>`).join('')}</ul>
+  </article>`;
+}
+
+function setStretch(day, mutateLog) {
+  const m = state.data.manual ??= {};
+  m.stretch ??= {};
+  const items = stretchItems();
+  const log = { done: [], ...(m.stretch[day] || {}) };
+  const was = !!log.complete;
+  mutateLog(log);
+  log.done = log.done.filter((id) => !items.length || items.some((i) => i.id === id));
+  if (items.length) log.complete = log.done.length >= items.length;
+  if (!log.complete && !log.done.length) delete m.stretch[day]; else m.stretch[day] = log;
+  render();
+  if (log.complete && !was) toast('Dehnen erledigt – gut gemacht!');
+  // several taps in a row → one commit
+  clearTimeout(stretchSaveTimer);
+  const snapshotLog = m.stretch[day] ? JSON.parse(JSON.stringify(m.stretch[day])) : null;
+  stretchSaveTimer = setTimeout(() => {
+    store.updateManual((mm) => {
+      mm.stretch ??= {};
+      if (snapshotLog) mm.stretch[day] = snapshotLog; else delete mm.stretch[day];
+      return mm;
+    }, `Dehnen ${day}`).catch((err) => toast(`Speichern fehlgeschlagen: ${err.message}`, 'error'));
+  }, 1500);
+}
+
+function startStretchTimer(id) {
+  const it = stretchItems().find((i) => i.id === id);
+  if (!it) return;
+  const stop = () => { clearInterval(stretchTimer?.h); stretchTimer = null; };
+  if (stretchTimer?.id === id) { stop(); render(); return; }
+  stop();
+  const per = it.sec || 30;
+  const sides = it.sides ? 2 : 1;
+  const T = { id, left: per, side: 1, label: '' };
+  const lab = () => { T.label = `${sides > 1 ? (T.side === 1 ? 'Links ' : 'Rechts ') : ''}${Math.floor(T.left / 60)}:${String(T.left % 60).padStart(2, '0')}`; };
+  lab();
+  stretchTimer = T;
+  render();
+  T.h = setInterval(() => {
+    T.left -= 1;
+    if (T.left <= 0) {
+      if (T.side < sides) { T.side += 1; T.left = per; navigator.vibrate?.(200); toast('Seite wechseln'); } else {
+        stop();
+        navigator.vibrate?.([200, 100, 200]);
+        setStretch(todayISO(), (log) => { if (!log.done.includes(id)) log.done.push(id); });
+        return;
+      }
+    }
+    lab();
+    const b = document.getElementById(`stt-${id}`);
+    if (b) b.textContent = T.label;
+  }, 1000);
+}
+
+// ── race countdown ──
+const fmtRace = (sec) => (sec ? fmtClock(Math.round(sec)) : '–');
+function raceCard(acts) {
+  const r = profile().race;
+  if (!r?.date) return '';
+  const ph = racePhase(r);
+  if (ph.days < -7) return '';
+  const dist = r.distanceKm || HM_KM;
+  const est = raceEstimate(acts, dist);
+  const garmin = Math.abs(dist - HM_KM) < 0.1 ? snapshot().racePredictions?.half : Math.abs(dist - 10) < 0.1 ? snapshot().racePredictions?.['10k'] : null;
+  const diff = (sec) => (r.goalSec && sec ? `<span class="trend ${sec <= r.goalSec ? 'good' : 'bad'}">${sec <= r.goalSec ? '−' : '+'}${fmtClock(Math.abs(Math.round(sec - r.goalSec)))} zum Ziel</span>` : '');
+  return `<article class="card race-card">
+    <div class="race-count"><strong>${ph.days > 0 ? ph.days : '🏁'}</strong><span>${ph.days > 1 ? 'Tage' : ph.days === 1 ? 'Tag' : ''}</span></div>
+    <div class="race-main">
+      <p class="eyebrow">${esc(r.name || RACE_DISTANCES[dist] || 'Wettkampf')} · ${esc(fmtDate(r.date, { day: 'numeric', month: 'long' }))}</p>
+      <h2>${esc(ph.label)}</h2>
+      <p class="muted small">${esc(ph.text)}</p>
+      <dl class="stat-grid race-stats">
+        ${r.goalSec ? `<div><dt>Ziel</dt><dd>${fmtRace(r.goalSec)}</dd><span class="muted small">${fmtPace(r.goalSec / dist)} /km</span></div>` : ''}
+        <div><dt>Prognose aus deinen Läufen</dt><dd>${fmtRace(est?.sec)}</dd>${diff(est?.sec)}</div>
+        ${garmin ? `<div><dt>Garmin-Prognose</dt><dd>${fmtRace(garmin)}</dd>${diff(garmin)}</div>` : ''}
+      </dl>
+      ${est ? `<p class="muted small">Basis: ${esc(actTitle(est.run))} vom ${esc(fmtDate(est.run.date, { day: 'numeric', month: 'short' }))} (${fmtNum(est.run.distanceKm, 1)} km${est.factor < 1 ? `, hochgerechnet mit RPE ${est.rpe}${est.run.rpe ? '' : ' (geschätzt)'}` : ''}).</p>` : '<p class="muted small">Für eine eigene Prognose braucht es einen Lauf ab 5 km in den letzten 8 Wochen.</p>'}
+    </div>
+  </article>`;
+}
+
+// ── unfinished strength session ──
+function draftBanner() {
+  const d = store.localGet('draft');
+  if (!d) return '';
+  return `<div class="banner draft-banner">${icon('clock', 18)}
+    <p><strong>Angefangenes Training:</strong> ${esc(d.fields?.title || 'Krafttraining')} · ${esc(relTime(d.savedAt))}</p>
+    <button class="btn btn-sm btn-primary" data-action="draft-resume">Fortsetzen</button>
+    <button class="btn btn-sm" data-action="draft-discard">Verwerfen</button>
+  </div>`;
+}
+
 
 function strengthCard(acts) {
   const p = profile();
   if (!p.templates.length || (p.sports?.length && !p.sports.includes('strength'))) return '';
   const next = nextTemplate(p.templates, acts);
-  return `<article class="card strength-next">
+  const cat = catalog(p);
+  const untested = next.items.filter((i) => { const ex = cat.find((e) => e.id === i.id); return ex && ex.unit !== 's' && !ex.bw && !exerciseHistory(acts, i.id).length; });
+  return `<article class="card strength-next">${untested.length >= 3 ? `<p class="small eval-hint">${icon('target', 14)} Für ${untested.length} Übungen gibt es noch keine Werte. Mit der <button class="link" data-action="eval-start">Einstufung</button> bekommst du passende Startgewichte.</p>` : ''}
     <div><p class="eyebrow">Krafttraining</p><h2>Als Nächstes: ${esc(next.name)}</h2>
     <p class="muted small">${esc(next.items.map((i) => catalog(p).find((e) => e.id === i.id)?.name || i.id).join(' · '))}</p></div>
     <div class="ex-actions">
       <button class="btn btn-primary" data-action="tpl-start" data-id="${esc(next.id)}">${icon('plus', 16)}${esc(next.name)} starten</button>
       ${p.templates.filter((t) => t.id !== next.id).map((t) => `<button class="btn" data-action="tpl-start" data-id="${esc(t.id)}">${esc(t.name)}</button>`).join('')}
     </div>
+  </article>`;
+}
+
+// ───────────────────────── page: plan ─────────────────────────
+const WEEKDAYS_LONG = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+const PLAN_SPORTS = () => {
+  const p = profile();
+  const active = p.sports?.length ? p.sports : Object.keys(SPORTS);
+  return Object.keys(SPORTS).filter((k) => active.includes(k) || k === 'other');
+};
+
+function renderPlan() {
+  const view = state.planView;
+  return `${pageHead('Plan', 'Woche, feste Termine & Kalender', `
+      <div class="segmented" role="group" aria-label="Ansicht">${[['week', 'Woche'], ['month', 'Kalender']].map(([k, l]) => `<button data-action="plan-view" data-view="${k}" aria-pressed="${view === k}">${l}</button>`).join('')}</div>
+      <a class="btn" href="#/aktivitaeten">${icon('list', 16)}<span>Aktivitäten</span></a>`)}
+    ${demoBanner()}
+    ${view === 'month' ? calendarView() : weekView()}`;
+}
+
+function weekView() {
+  const acts = activities();
+  const L = light();
+  const today = todayISO();
+  const wk = state.planWeek || weekStart(today);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(wk, i));
+  const items = planRange(wk, addDays(wk, 6));
+  const stretchOn = stretchItems().length || Object.keys(stretchLog()).length;
+  const done = items.filter((it) => planDone(it, acts)).length;
+  const p = profile();
+  const an = analysis();
+  const suggestions = (an?.plan || []).filter((x) => x.type !== 'rest' && x.date >= today);
+  const own = manualData().plan || [];
+  const taken = (x) => own.some((o) => o.date === x.date && o.sport === x.type && o.title === x.title);
+
+  const dayHtml = (d) => {
+    const its = items.filter((x) => x.date === d);
+    const logged = acts.filter((a) => a.date === d);
+    const lims = activeLimits(limitsList(), d).filter((l) => d <= today || l.to);
+    const st = stretchLog()[d];
+    return `<section class="pw-day${d === today ? ' is-today' : ''}${d < today ? ' past' : ''}">
+      <header><div><strong>${d === today ? 'Heute' : WEEKDAYS_LONG[(parseDay(d).getDay() + 6) % 7]}</strong> <span class="muted small">${esc(fmtDate(d, { day: 'numeric', month: 'short' }))}</span></div>
+        ${lims.length ? `<span class="chip warn">${esc(lims.map((l) => LIMIT_SHORT[l.kind]).join(', '))}</span>` : ''}</header>
+      ${its.length ? its.map((it) => planRow(it, acts, L)).join('') : '<p class="muted small rest">Ruhetag</p>'}
+      ${logged.length ? `<p class="small logged">${icon('check', 13)} Erfasst: ${logged.map((a) => `<button class="link" data-action="open-activity" data-id="${esc(a.id)}">${sport(a.type).emoji} ${esc(actTitle(a))}</button>`).join(' · ')}</p>` : ''}
+      <div class="day-foot">
+        ${stretchOn ? `<button class="chip-toggle${st?.complete ? ' on' : ''}" data-action="stretch-day" data-date="${d}" aria-pressed="${!!st?.complete}">🧘 Dehnen${st?.complete ? ' ✓' : ''}</button>` : ''}
+        <button class="link small" data-action="plan-add" data-date="${d}">${icon('plus', 13)} Einheit</button>
+      </div>
+      ${state.planAdd === d ? planAddForm(d) : ''}
+    </section>`;
+  };
+
+  return `<div class="week-nav">
+      <button class="icon-btn" data-action="plan-week" data-step="-1" aria-label="Vorherige Woche">‹</button>
+      <div><strong>KW ${isoWeek(wk)}</strong> <span class="muted small">${esc(fmtDate(wk, { day: 'numeric', month: 'short' }))} – ${esc(fmtDate(addDays(wk, 6), { day: 'numeric', month: 'short' }))}</span></div>
+      <button class="icon-btn" data-action="plan-week" data-step="1" aria-label="Nächste Woche">›</button>
+      ${wk !== weekStart(today) ? '<button class="btn btn-sm" data-action="plan-week" data-step="0">Heute</button>' : ''}
+      <span class="muted small week-done">${done}/${items.length} erledigt</span>
+    </div>
+    <div class="plan-week">${days.map(dayHtml).join('')}</div>
+    <section class="grid two">
+      ${suggestions.length ? `<article class="card">
+        <header class="card-head"><h2>${icon('sparkles', 18)} Vorschlag vom Coach</h2>${suggestions.some((x) => !taken(x)) ? '<button class="btn btn-sm" data-action="plan-take-all">Alle übernehmen</button>' : ''}</header>
+        <div class="sugg-list">${suggestions.map((x, i) => `<div class="sugg-item">
+          <div><strong>${esc(weekdayShort(x.date))} ${esc(fmtDate(x.date, { day: 'numeric', month: 'short' }))} · ${sport(x.type).emoji} ${esc(x.title)}</strong><p class="muted small">${esc(x.details || '')}</p></div>
+          ${taken(x) ? '<span class="chip good">im Plan</span>' : `<button class="btn btn-sm" data-action="plan-take" data-i="${(an.plan || []).indexOf(x)}">Übernehmen</button>`}
+        </div>`).join('')}</div>
+      </article>` : ''}
+      ${recurringCard(p)}
+      <article class="card">
+        <header class="card-head"><h2>${icon('calendar', 18)} In die Kalender-App</h2></header>
+        <p class="muted small">Lädt eine Kalender-Datei mit deinem Plan der nächsten 4 Wochen (ganztägige Einträge). Auf dem iPhone öffnen und «Alle hinzufügen» tippen. Das ist eine Momentaufnahme – nach Änderungen erneut laden.</p>
+        <div class="form-actions"><button class="btn" data-action="ics-plan">${icon('download', 16)}Plan als Kalender-Datei</button></div>
+      </article>
+    </section>`;
+}
+
+function planAddForm(d) {
+  const p = profile();
+  return `<form class="form plan-add" data-date="${d}">
+    <div class="row">
+      <label class="field"><span>Sportart</span><select name="sport">${PLAN_SPORTS().map((k) => `<option value="${k}">${SPORTS[k].emoji} ${esc(SPORTS[k].label)}</option>`).join('')}</select></label>
+      <label class="field grow"><span>Titel</span><input name="title" placeholder="z.B. Lockerer Lauf 45′" maxlength="80"></label>
+    </div>
+    ${p.templates.length ? `<label class="field"><span>Kraft-Vorlage <em>optional</em></span><select name="templateId"><option value="">–</option>${p.templates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></label>` : ''}
+    <div class="form-actions"><button type="button" class="btn btn-sm" data-action="plan-add-cancel">Abbrechen</button><button class="btn btn-sm btn-primary" type="submit">${icon('check', 14)}Eintragen</button></div>
+  </form>`;
+}
+
+function recurringCard(p) {
+  const rec = p.recurring || [];
+  return `<article class="card">
+    <header class="card-head"><h2>📌 Feste Termine</h2><span class="muted small">jede Woche automatisch im Plan</span></header>
+    ${rec.length ? `<ul class="custom-ex">${rec.map((r) => `<li><span>${esc(WEEKDAYS_LONG[r.weekday])} · ${sport(r.sport).emoji} ${esc(r.title || SPORTS[r.sport]?.label)}</span>
+      <button class="icon-btn sm" data-action="rec-remove" data-id="${esc(r.id)}" aria-label="Termin entfernen">${icon('trash', 16)}</button></li>`).join('')}</ul>`
+      : '<p class="muted small">Noch keine festen Termine.</p>'}
+    <form id="rec-form" class="form" style="margin-top:12px">
+      <div class="row">
+        <label class="field"><span>Tag</span><select name="weekday">${WEEKDAYS_LONG.map((w, i) => `<option value="${i}" ${i === 1 ? 'selected' : ''}>${w}</option>`).join('')}</select></label>
+        <label class="field"><span>Sportart</span><select name="sport">${PLAN_SPORTS().map((k) => `<option value="${k}" ${k === 'swim' ? 'selected' : ''}>${SPORTS[k].emoji} ${esc(SPORTS[k].label)}</option>`).join('')}</select></label>
+        <label class="field grow"><span>Titel</span><input name="title" placeholder="z.B. Schwimmen" maxlength="60"></label>
+      </div>
+      ${p.templates.length ? `<label class="field"><span>Kraft-Vorlage <em>optional</em></span><select name="templateId"><option value="">–</option>${p.templates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}</select></label>` : ''}
+      <div class="form-actions"><button class="btn" type="submit">${icon('plus', 16)}Festen Termin hinzufügen</button></div>
+    </form>
+    <p class="muted small">Einzelne Termine kannst du im Wochenplan trotzdem verschieben oder streichen – die Regel bleibt.</p>
+  </article>`;
+}
+
+function calendarView() {
+  const today = todayISO();
+  const month = state.calMonth || today.slice(0, 7);
+  const first = `${month}-01`;
+  const start = weekStart(first);
+  const nextMonth = todayISO(new Date(parseDay(first).getFullYear(), parseDay(first).getMonth() + 1, 1));
+  const end = addDays(weekStart(addDays(nextMonth, -1)), 6);
+  const acts = activities();
+  const items = planRange(start, end);
+  const ci = checkins();
+  const st = stretchLog();
+  const cells = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) {
+    const da = acts.filter((a) => a.date === d);
+    const open = items.filter((x) => x.date === d && !planDone(x, acts));
+    const score = checkinScore(ci[d]);
+    const lim = activeLimits(limitsList(), d).filter((l) => d <= today || l.to).length;
+    cells.push(`<button class="cal-day${d.slice(0, 7) !== month ? ' other' : ''}${d === today ? ' today' : ''}${lim ? ' limited' : ''}" data-action="cal-day" data-date="${d}"
+      aria-label="${esc(fmtDate(d, { weekday: 'long', day: 'numeric', month: 'long' }))}: ${da.length} Aktivitäten, ${open.length} geplant">
+      <span class="cal-num">${parseDay(d).getDate()}</span>
+      <span class="cal-dots">${da.map((a) => `<i style="background:${sportColor(a.type)}" title="${esc(actTitle(a))}"></i>`).join('')}${open.map((x) => `<i class="planned" style="--c:${sportColor(x.sport)}" title="geplant: ${esc(x.title || '')}"></i>`).join('')}</span>
+      <span class="cal-meta">${score != null ? `<b class="ci-${score >= 3.5 ? 'g' : score >= 2.5 ? 'y' : 'r'}"></b>` : ''}${st[d]?.complete ? '🧘' : ''}</span>
+    </button>`);
+  }
+  const monthActs = acts.filter((a) => a.date.startsWith(month));
+  const label = parseDay(first).toLocaleDateString('de-CH', { month: 'long', year: 'numeric' });
+  const shift = (n) => { const d = parseDay(first); d.setMonth(d.getMonth() + n); return todayISO(d).slice(0, 7); };
+  return `<article class="card calendar">
+    <div class="week-nav">
+      <button class="icon-btn" data-action="cal-month" data-month="${shift(-1)}" aria-label="Vorheriger Monat">‹</button>
+      <div><strong>${esc(label)}</strong> <span class="muted small">${monthActs.length} Einheiten · ${fmtDur(monthActs.reduce((s, a) => s + (a.durationMin || 0), 0))}</span></div>
+      <button class="icon-btn" data-action="cal-month" data-month="${shift(1)}" aria-label="Nächster Monat">›</button>
+      ${month !== today.slice(0, 7) ? `<button class="btn btn-sm" data-action="cal-month" data-month="${today.slice(0, 7)}">Heute</button>` : ''}
+    </div>
+    <div class="cal-grid">${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((w) => `<span class="cal-wd">${w}</span>`).join('')}${cells.join('')}</div>
+    <div class="legend cal-legend">${sportsIn(monthActs).map((t) => `<span><i style="background:${sportColor(t)}"></i>${esc(SPORT_LABELS[t])}</span>`).join('')}
+      <span><i class="planned-i"></i>geplant</span><span><i class="ci-g-i"></i>Check-in gut</span><span><i class="ci-r-i"></i>tief</span><span>🧘 gedehnt</span></div>
+    <p class="muted small">Tipp: Tag antippen öffnet die Woche.</p>
+  </article>`;
+}
+
+// ── limits (sheet) ──
+function openLimitForm() {
+  openSheet(`<form id="limit-form" class="sheet-body form" novalidate>
+    <header class="sheet-head"><div><h2>Einschränkung melden</h2><p class="muted">Plan, Ampel und Coach passen sich an.</p></div>
+      <button type="button" class="icon-btn" data-action="close-sheet" aria-label="Schliessen">${icon('close')}</button></header>
+    <div class="segmented lim-kind">${Object.entries(LIMIT_KIND).map(([k, l], i) => `<label><input type="radio" name="kind" value="${k}" ${i === 0 ? 'checked' : ''}>${esc(l)}</label>`).join('')}</div>
+    <label class="field"><span>Körperstelle oder Beschreibung</span><input name="area" placeholder="z.B. rechtes Knie, Erkältung" maxlength="60"></label>
+    <div class="row">
+      <label class="field"><span>Von</span><input type="date" name="from" value="${todayISO()}"></label>
+      <label class="field"><span>Bis <em>optional</em></span><input type="date" name="to"></label>
+    </div>
+    <fieldset class="chip-checks"><legend>Was ist betroffen?</legend>
+      ${Object.entries(AFFECTS).map(([k, l]) => `<label><input type="checkbox" name="affects" value="${k}">${esc(l)}</label>`).join('')}</fieldset>
+    <label class="switch ill-only"><input type="checkbox" name="fever"><span></span>Fieber oder Symptome unterhalb des Halses (Husten, Brust, Magen)</label>
+    <label class="field"><span>Notiz</span><input name="note" placeholder="z.B. Schmerz 3/10 beim Laufen, nicht in Ruhe" maxlength="120"></label>
+    <p class="muted small">Bei starken, zunehmenden oder unklaren Beschwerden ärztlich abklären lassen.</p>
+    <footer class="sheet-actions"><button type="button" class="btn" data-action="close-sheet">Abbrechen</button><button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button></footer>
+  </form>`);
+}
+
+async function submitLimit(form) {
+  const fd = new FormData(form);
+  const kind = fd.get('kind');
+  const rec = JSON.parse(JSON.stringify({
+    id: newId('l'), kind, area: fd.get('area').trim() || undefined, from: fd.get('from') || todayISO(), to: fd.get('to') || undefined,
+    affects: kind === 'ill' ? Object.keys(AFFECTS) : fd.getAll('affects'), fever: kind === 'ill' && fd.get('fever') === 'on' ? true : undefined,
+    note: fd.get('note').trim() || undefined, created: new Date().toISOString(),
+  }));
+  sheet.close();
+  await saveManual((m) => { m.limits = [rec, ...(m.limits || [])]; }, `Einschränkung: ${LIMIT_SHORT[kind]}`, 'Einschränkung gespeichert');
+}
+
+// ── evaluation (Einstufung) ──
+function evalExercises() {
+  const p = profile();
+  const cat = catalog(p);
+  const seen = new Map();
+  for (const t of p.templates) {
+    for (const i of t.items) {
+      const ex = cat.find((e) => e.id === i.id);
+      if (!ex || seen.has(ex.id)) continue;
+      seen.set(ex.id, { ex, item: { ...i, inc: i.inc ?? defaultInc(ex) }, skip: ex.unit === 's' || ex.bw || !(i.inc ?? defaultInc(ex)) });
+    }
+  }
+  return [...seen.values()];
+}
+
+function openEval() {
+  const list = evalExercises();
+  if (!list.length) { toast('Lege zuerst Trainingsvorlagen an (Einstellungen → Trainingsvorlagen).', 'error'); return; }
+  openSheet(`<form id="eval-form" class="sheet-body form" novalidate>
+    <header class="sheet-head"><div><h2>Einstufung</h2><p class="muted">Testtraining für deine Startgewichte</p></div>
+      <button type="button" class="icon-btn" data-action="close-sheet" aria-label="Schliessen">${icon('close')}</button></header>
+    <div class="banner"><p><strong>So gehst du vor:</strong> Kurz aufwärmen. Pro Übung 1–2 leichte Aufwärmsätze, dann das Gewicht in Stufen erhöhen. Für den Testsatz ein Gewicht wählen, das du etwa 6–10 Mal schaffst, und aufhören, wenn noch etwa 2 Wiederholungen gingen. Nie bis zum Muskelversagen, keine Maximalversuche. Mehr als 12 Wiederholungen → beim nächsten Versuch mehr Gewicht (höchstens 3–4 Versuche, 2–3 Min. Pause). Bei Kurzhanteln gilt das Gewicht pro Hand. Die App rechnet ein eher vorsichtiges Startgewicht für die ersten zwei Wochen.</p></div>
+    <div class="eval-list">${list.map(({ ex, item, skip }) => skip
+      ? `<div class="eval-row skip"><strong>${esc(ex.name)}</strong><span class="muted small">${ex.unit === 's' ? 'Zeitübung: startet mit der Zeit aus der Vorlage.' : 'Körpergewicht: kein Test nötig – im ersten Training eintragen, was sauber geht.'}</span></div>`
+      : `<div class="eval-row" data-ex-id="${esc(ex.id)}" data-rep-min="${item.repMin}" data-inc="${item.inc}">
+        <div><strong>${esc(ex.name)}</strong><span class="muted small">Ziel im Training: ${item.sets} × ${item.repMin}${item.repMax !== item.repMin ? `–${item.repMax}` : ''}</span></div>
+        <div class="eval-inputs">
+          <label class="field"><span>kg</span><input type="number" inputmode="decimal" step="0.5" min="0" name="kg"></label>
+          <label class="field"><span>Wdh.</span><input type="number" inputmode="numeric" min="1" max="30" name="reps"></label>
+          <label class="field"><span>Reserve</span><select name="rir">${[0, 1, 2, 3, 4].map((n) => `<option ${n === 2 ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <output class="eval-out">–</output>
+        </div>
+      </div>`).join('')}</div>
+    <label class="field"><span>Dauer (min)</span><input type="number" name="durationMin" inputmode="numeric" min="1" value="60"></label>
+    <footer class="sheet-actions"><button type="button" class="btn" data-action="close-sheet">Abbrechen</button><button type="submit" class="btn btn-primary">${icon('check', 16)}Startgewichte speichern</button></footer>
+  </form>`);
+}
+
+function evalRowResult(row) {
+  const v = (n) => Number(row.querySelector(`[name=${n}]`).value);
+  return startKg(v('kg'), v('reps'), v('rir'), Number(row.dataset.repMin), Number(row.dataset.inc) || 2.5);
+}
+
+async function submitEval(form) {
+  const cat = catalog(profile());
+  const rows = [...form.querySelectorAll('.eval-row:not(.skip)')].filter((r) => evalRowResult(r) > 0);
+  if (!rows.length) { toast('Trag mindestens einen Testsatz ein (kg und Wiederholungen).', 'error'); return; }
+  const exercises = rows.map((r) => {
+    const ex = cat.find((e) => e.id === r.dataset.exId);
+    return { id: ex.id, name: ex.name, group: ex.group, sets: [{ kg: Number(r.querySelector('[name=kg]').value), reps: Number(r.querySelector('[name=reps]').value) }], startKg: evalRowResult(r) };
+  });
+  const now = new Date();
+  const activity = {
+    id: newId('m'), source: 'manual', type: 'strength', eval: true, title: 'Einstufung', date: todayISO(),
+    start: `${todayISO()}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`,
+    durationMin: Number(new FormData(form).get('durationMin')) || 60, exercises,
+  };
+  try {
+    await store.saveActivity(activity);
+    sheet.close();
+    toast(`Startgewichte gespeichert: ${exercises.map((e) => `${e.name} ${fmtNum(e.startKg, 1)} kg`).join(', ')}`, 'ok', 8000);
+    await reload();
+  } catch (err) { toast(`Speichern fehlgeschlagen: ${err.message}`, 'error'); }
+}
+
+// ── draft of an unfinished strength session (per device) ──
+let draftTimer = null;
+function saveDraftSoon(form) {
+  if (form?.dataset.mode !== 'new') return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    if (!form.isConnected) return;
+    const fd = new FormData(form);
+    if (fd.get('type') !== 'strength') return;
+    const blocks = [...form.querySelectorAll('.ex-block')].map((b) => ({
+      id: b.dataset.exId, name: b.dataset.exName, group: b.dataset.exGroup, unit: b.dataset.exUnit || undefined,
+      plan: b.dataset.plan ? JSON.parse(b.dataset.plan) : null, decision: b.dataset.decision || '',
+      sets: [...b.querySelectorAll('.set-row')].map((r) => ({ kg: r.querySelector('[data-f=kg]').value, reps: r.querySelector('[data-f=reps]').value })),
+    }));
+    if (!blocks.some((b) => b.sets.some((s) => s.kg || s.reps))) return;
+    const fields = Object.fromEntries(['title', 'date', 'time', 'durationMin', 'avgHr', 'rpe', 'feeling', 'notes', 'templateId'].map((k) => [k, fd.get(k) ?? '']));
+    store.localSet('draft', {
+      fields, blocks, warm: fd.getAll('warm').length, started: form.dataset.started, step: form.dataset.step,
+      gym: form.classList.contains('gym-on'), newExercises: form.dataset.newExercises, savedAt: new Date().toISOString(),
+    });
+  }, 600);
+}
+
+function resumeDraft() {
+  const d = store.localGet('draft');
+  if (!d) return;
+  openForm({ type: 'strength', date: d.fields.date || todayISO(), title: d.fields.title, rpe: Number(d.fields.rpe) || undefined, feeling: Number(d.fields.feeling) || undefined, notes: d.fields.notes, templateId: d.fields.templateId, durationMin: d.fields.durationMin || undefined, avgHr: d.fields.avgHr || undefined }, { draft: true });
+  const form = $('#act-form');
+  form.dataset.mode = 'new';
+  form.dataset.id = '';
+  if (d.newExercises) form.dataset.newExercises = d.newExercises;
+  if (d.fields.time) form.elements.time.value = d.fields.time;
+  const all = activities();
+  form.querySelector('.ex-list').innerHTML = d.blocks.map((b) => {
+    const hist = exerciseHistory(all, b.id);
+    return exerciseBlock({ id: b.id, name: b.name, group: b.group, unit: b.unit, sets: b.sets }, hist[0], b.plan ? { ...b.plan, decision: b.decision } : undefined);
+  }).join('');
+  form.querySelectorAll('[name=warm]').forEach((c, i) => { c.checked = i < (d.warm || 0); });
+  if (d.started) form.dataset.started = d.started;
+  if (d.gym) { form.dataset.step = d.step || '0'; gymStart(form); }
+}
+
+// ── settings: race, stretching, reminders ──
+function raceSettingsCard(p) {
+  const r = p.race || {};
+  const g = r.goalSec ? fmtClock(r.goalSec) : '';
+  return `<article class="card">
+    <header class="card-head"><h2>🏁 Wettkampf</h2>${r.date ? `<span class="muted small">in ${Math.max(0, daysBetween(todayISO(), r.date))} Tagen</span>` : ''}</header>
+    <form id="race-form" class="form">
+      <div class="row">
+        <label class="field grow"><span>Name</span><input name="name" value="${esc(r.name || '')}" placeholder="z.B. Zürich Halbmarathon" maxlength="60"></label>
+        <label class="field"><span>Datum</span><input type="date" name="date" value="${esc(r.date || '')}"></label>
+      </div>
+      <div class="row">
+        <label class="field"><span>Distanz</span><select name="distanceKm">${Object.entries(RACE_DISTANCES).map(([k, l]) => `<option value="${k}" ${Number(k) === (r.distanceKm || HM_KM) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field"><span>Zielzeit (h:mm:ss)</span><input name="goal" value="${esc(g)}" placeholder="1:45:00" inputmode="numeric" pattern="[0-9:]*"></label>
+      </div>
+      <p class="muted small">Ohne Datum zeigt die App nur Zielpace und Prognose. Mit Datum gibt es Countdown und Phasen (Aufbau, spezifisch, Tapering), und der Coach plant darauf hin.</p>
+      <div class="form-actions">${r.date || r.goalSec ? '<button type="button" class="btn btn-danger" data-action="race-clear">Entfernen</button>' : ''}<button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button></div>
+    </form>
+  </article>`;
+}
+
+function parseClock(v) {
+  const parts = String(v || '').trim().split(':').map(Number);
+  if (!parts.length || parts.some((x) => Number.isNaN(x))) return 0;
+  return parts.reduce((s, x) => s * 60 + x, 0) * (parts.length === 2 ? 60 : 1);
+}
+
+function stretchSettingsCard(p) {
+  const items = p.stretch || [];
+  return `<article class="card">
+    <header class="card-head"><h2>🧘 Dehnen</h2><span class="muted small">${items.length ? `${items.length} Übungen · ca. ${stretchMinutes(items)} Min.` : 'noch leer'}</span></header>
+    <form id="stretch-form" class="form">
+      <div class="st-rows">${(items.length ? items : [{ id: '', name: '', sec: 30 }]).map(stretchRow).join('')}</div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-sm" data-action="st-row-add">${icon('plus', 14)}Übung</button>
+        ${!items.length ? '<button type="button" class="btn btn-sm" data-action="st-suggest">Vorschlag laden</button>' : ''}
+        <button type="submit" class="btn btn-sm btn-primary">${icon('check', 14)}Dehnroutine speichern</button>
+      </div>
+    </form>
+    <p class="muted small">Statisch gehalten, ruhig atmen, kein Schmerz. Am besten nach dem Training oder am Abend – nicht direkt vor dem Krafttraining.</p>
+  </article>`;
+}
+const stretchRow = (it) => `<div class="st-row" data-id="${esc(it.id || '')}">
+  <label class="field grow"><span>Übung</span><input name="st-name" value="${esc(it.name || '')}" placeholder="z.B. Hüftbeuger im Ausfallschritt" maxlength="60"></label>
+  <label class="field"><span>Sek.</span><input name="st-sec" type="number" min="5" step="5" inputmode="numeric" value="${esc(it.sec ?? 30)}"></label>
+  <label class="switch sm"><input type="checkbox" name="st-sides" ${it.sides ? 'checked' : ''}><span></span>je Seite</label>
+  <button type="button" class="icon-btn sm" data-action="st-row-remove" aria-label="Übung entfernen">${icon('trash', 16)}</button>
+</div>`;
+
+function submitStretch(form) {
+  const items = [...form.querySelectorAll('.st-row')].map((r) => ({
+    id: r.dataset.id || newId('st'), name: r.querySelector('[name=st-name]').value.trim(),
+    sec: Number(r.querySelector('[name=st-sec]').value) || 30, sides: r.querySelector('[name=st-sides]').checked || undefined,
+  })).filter((i) => i.name);
+  return saveProfile((p) => ({ ...p, stretch: items }), items.length ? 'Dehnroutine gespeichert' : 'Dehnroutine geleert');
+}
+
+function remindersCard(p) {
+  const r = { checkin: '07:30', stretch: '21:00', checkinOn: true, stretchOn: true, ...(p.reminders || {}) };
+  return `<article class="card">
+    <header class="card-head"><h2>${icon('bell', 18)} Erinnerungen</h2></header>
+    <p class="muted small">Web-Apps dürfen auf dem iPhone nicht zuverlässig selbst erinnern. Deshalb erstellt die App eine Kalender-Datei mit täglichen Terminen inkl. Hinweis – die Kalender-App meldet sich dann pünktlich.</p>
+    <form id="reminder-form" class="form">
+      <div class="row">
+        <label class="switch"><input type="checkbox" name="checkinOn" ${r.checkinOn ? 'checked' : ''}><span></span>Check-in</label>
+        <label class="field"><span>um</span><input type="time" name="checkin" value="${esc(r.checkin)}"></label>
+      </div>
+      <div class="row">
+        <label class="switch"><input type="checkbox" name="stretchOn" ${r.stretchOn ? 'checked' : ''}><span></span>Dehnen</label>
+        <label class="field"><span>um</span><input type="time" name="stretch" value="${esc(r.stretch)}"></label>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('download', 16)}Speichern & Kalender-Datei laden</button></div>
+    </form>
+    <details class="small"><summary>So geht's auf dem iPhone</summary>
+      <ol class="howto"><li>Auf «Kalender-Datei laden» tippen.</li><li>Falls eine Vorschau erscheint: «Alle hinzufügen» bzw. «Zum Kalender hinzufügen» wählen.</li><li>Klappt es in der Web-App nicht, die App-Adresse in Safari öffnen und dort laden.</li><li>Zeit ändern: neue Datei laden und den alten Termin im Kalender löschen.</li></ol></details>
+  </article>`;
+}
+
+function downloadText(name, text, type) {
+  const blob = new Blob([text], { type });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+function submitReminders(form) {
+  const fd = new FormData(form);
+  const r = { checkin: fd.get('checkin') || '07:30', stretch: fd.get('stretch') || '21:00', checkinOn: fd.get('checkinOn') === 'on', stretchOn: fd.get('stretchOn') === 'on' };
+  const url = location.href.split('#')[0];
+  const reminders = [
+    r.checkinOn && { id: 'checkin', time: r.checkin, title: 'Trainingsbuch: Check-in', text: 'Wie geht\'s dir heute? 30 Sekunden im Trainingsbuch.', url: `${url}#/heute` },
+    r.stretchOn && { id: 'stretch', time: r.stretch, minutes: Math.max(5, stretchMinutes(stretchItems())), title: 'Trainingsbuch: Dehnen', text: stretchItems().map((i) => i.name).join(', ') || 'Tägliche Dehneinheit', url: `${url}#/heute` },
+  ].filter(Boolean);
+  if (reminders.length) downloadText('trainingsbuch-erinnerungen.ics', buildIcs({ reminders }), 'text/calendar');
+  return saveProfile((p) => ({ ...p, reminders: r }), reminders.length ? 'Kalender-Datei geladen – öffnen und hinzufügen' : 'Erinnerungen ausgeschaltet');
+}
+
+function exportPlanIcs() {
+  const today = todayISO();
+  const items = planRange(today, addDays(today, 27));
+  if (!items.length) { toast('In den nächsten 4 Wochen ist nichts geplant.'); return; }
+  downloadText('trainingsbuch-plan.ics', buildIcs({
+    plan: items.map((it) => ({ id: it.id, date: it.date, summary: `${sport(it.sport).emoji} ${it.title || sport(it.sport).label}`, description: [it.note, it.src === 'garmin' ? 'aus dem Garmin-Plan' : ''].filter(Boolean).join('\n') })),
+  }), 'text/calendar');
+  toast(`${items.length} Einheiten als Kalender-Datei geladen`);
+}
+
+// ── monthly review (Coach page) ──
+function monthStats(month) {
+  const acts = activities().filter((a) => a.date.startsWith(month) && !a.eval);
+  const days = healthDays().filter((d) => d.date.startsWith(month));
+  const avgOf = (k) => avg(days.map((d) => d[k]).filter((v) => typeof v === 'number'));
+  const w = days.filter((d) => d.weightKg);
+  const ci = Object.entries(checkins()).filter(([d]) => d.startsWith(month)).map(([, c]) => checkinScore(c)).filter((x) => x != null);
+  const sum = (f) => acts.reduce((s, a) => s + (f(a) || 0), 0);
+  return {
+    units: acts.length,
+    hours: sum((a) => a.durationMin) / 60,
+    run: acts.filter((a) => a.type === 'run').length,
+    runKm: sum((a) => (a.type === 'run' ? a.distanceKm : 0)),
+    strength: acts.filter((a) => a.type === 'strength').length,
+    swimM: sum((a) => (a.type === 'swim' ? a.distanceKm * 1000 : 0)),
+    stretch: Object.entries(stretchLog()).filter(([d, v]) => d.startsWith(month) && v.complete).length,
+    sleep: avgOf('sleepH'), rhr: avgOf('restingHr'), hrv: avgOf('hrv'),
+    weight: w.length ? w.at(-1).weightKg : null,
+    checkin: ci.length ? avg(ci) : null,
+  };
+}
+
+function reviewCard() {
+  const ins = state.data.insights || {};
+  const today = todayISO();
+  const last = todayISO(new Date(parseDay(today).getFullYear(), parseDay(today).getMonth() - 1, 1)).slice(0, 7);
+  const months = Array.from({ length: 6 }, (_, i) => todayISO(new Date(parseDay(today).getFullYear(), parseDay(today).getMonth() - i, 1)).slice(0, 7));
+  const month = state.reviewMonth || last;
+  const prevMonth = todayISO(new Date(parseDay(`${month}-01`).getFullYear(), parseDay(`${month}-01`).getMonth() - 1, 1)).slice(0, 7);
+  const a = monthStats(month);
+  const b = monthStats(prevMonth);
+  const label = (m) => parseDay(`${m}-01`).toLocaleDateString('de-CH', { month: 'long', year: 'numeric' });
+  const rows = [
+    ['Einheiten', a.units, b.units, (v) => fmtNum(v), 1],
+    ['Trainingszeit', a.hours, b.hours, (v) => `${fmtNum(v, 1)} h`, 1],
+    ['Läufe', a.run, b.run, (v) => fmtNum(v), 1],
+    ['Lauf-km', a.runKm, b.runKm, (v) => fmtNum(v, 1), 1],
+    ['Krafttrainings', a.strength, b.strength, (v) => fmtNum(v), 1],
+    ['Schwimm-Meter', a.swimM, b.swimM, (v) => fmtNum(v), 1],
+    ['Dehn-Tage', a.stretch, b.stretch, (v) => fmtNum(v), 1],
+    ['Ø Schlaf', a.sleep, b.sleep, (v) => `${fmtHours(v)} h`, 1],
+    ['Ø Ruhepuls', a.rhr, b.rhr, (v) => `${fmtNum(v)} bpm`, -1],
+    ['Ø HRV', a.hrv, b.hrv, (v) => `${fmtNum(v)} ms`, 1],
+    ['Gewicht (Monatsende)', a.weight, b.weight, (v) => `${fmtNum(v, 1)} kg`, 0],
+    ['Ø Check-in', a.checkin, b.checkin, (v) => `${fmtNum(v, 1)}/5`, 1],
+  ].filter(([, x, y]) => x || y);
+  const delta = (x, y, f, better) => {
+    if (x == null || y == null || !y) return '';
+    const d = x - y;
+    if (Math.abs(d) < 1e-9) return '<span class="trend">→</span>';
+    const cls = better === 0 ? '' : (d > 0) === (better > 0) ? 'good' : 'bad';
+    return `<span class="trend ${cls}">${d > 0 ? '↑' : '↓'} ${f(Math.abs(d)).replace(/^(\d)/, '$1')}</span>`;
+  };
+  const review = ins.reviews?.[month];
+  return `<article class="card review-card">
+    <header class="card-head"><h2>📅 Monatsrückblick</h2>
+      <select id="review-month" class="mini-select" aria-label="Monat wählen">${months.map((m) => `<option value="${m}" ${m === month ? 'selected' : ''}>${esc(label(m))}</option>`).join('')}</select></header>
+    ${rows.length ? `<table class="review-table"><thead><tr><th></th><th>${esc(label(month).split(' ')[0])}</th><th>${esc(label(prevMonth).split(' ')[0])}</th><th></th></tr></thead>
+      <tbody>${rows.map(([l, x, y, f, better]) => `<tr><td>${esc(l)}</td><td>${x != null ? f(x) : '–'}</td><td class="muted">${y != null ? f(y) : '–'}</td><td>${delta(x, y, f, better)}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">Für diesen Monat gibt es noch keine Daten.</p>'}
+    ${review ? `<h3 class="sub">Der Coach meint</h3><div class="prose">${md(review.text)}</div><p class="muted small">${esc(relTime(review.at))}</p>`
+      : month === last ? `<p class="muted small" style="margin-top:12px">Der Coach schreibt den Rückblick automatisch am 1. jedes Monats (wenn der Claude-Schlüssel hinterlegt ist) – oder jetzt auf Knopfdruck.</p>
+        <div class="form-actions"><button class="btn" data-action="review-run" ${state.pending ? 'disabled' : ''}>${icon('sparkles', 16)}Rückblick schreiben lassen</button></div>` : ''}
   </article>`;
 }
 
@@ -480,10 +1227,10 @@ function openActivity(id) {
 }
 
 function openForm(existing, opts = {}) {
-  const mode = !existing ? 'new' : existing.source === 'garmin' ? 'garmin' : 'edit';
+  const mode = !existing || opts.draft ? 'new' : existing.source === 'garmin' ? 'garmin' : 'edit';
   const prof0 = profile();
-  const defType = opts.templateId ? 'strength' : !prof0.sports?.length || prof0.sports.includes('football') ? 'football' : prof0.sports[0];
-  const a = existing || { type: defType, date: todayISO(), football: { kind: 'training' } };
+  const defType = opts.templateId ? 'strength' : opts.type || (!prof0.sports?.length || prof0.sports.includes('football') ? 'football' : prof0.sports[0]);
+  const a = existing || { type: defType, date: opts.date || todayISO(), football: { kind: 'training' }, swimId: opts.swimId };
   const f = a.football || { kind: 'training' };
   const now = new Date();
   const time = a.start?.slice(11, 16) || `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -515,6 +1262,8 @@ function openForm(existing, opts = {}) {
       <label class="field distance-field"><span>Distanz (km)</span><input type="number" name="distanceKm" inputmode="decimal" step="0.01" min="0" value="${esc(a.distanceKm ?? '')}" placeholder="optional"></label>
       <label class="field"><span>Ø Puls</span><input type="number" name="avgHr" inputmode="numeric" min="40" max="230" value="${esc(a.avgHr ?? '')}" placeholder="optional"></label>
     </div>
+    <p id="pace-hint" class="muted small pace-hint" aria-live="polite"></p>
+    <label class="field swim-only"><span>Schwimmprogramm <em>optional</em></span><select name="swimId"><option value="">–</option>${SWIM.map((x) => `<option value="${x.id}" ${a.swimId === x.id ? 'selected' : ''}>${esc(x.name)} · ${x.m} m · ${esc(x.focus)}</option>`).join('')}</select></label>
 
     <fieldset class="football-fields">
       <legend>Fussball</legend>
@@ -566,6 +1315,9 @@ function openForm(existing, opts = {}) {
       <button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button>
     </footer>
   </form>`);
+  const f0 = $('#act-form');
+  if (opts.swimId && !f0.elements.distanceKm.value) f0.elements.distanceKm.value = (swimById(opts.swimId)?.m || 0) / 1000 || '';
+  updatePaceHint(f0);
   if (opts.templateId) {
     loadTemplate($('#act-form'), opts.templateId);
     const pref = store.getPrefs().gymMode;
@@ -635,6 +1387,22 @@ function gymRest(btn, sec) {
   restTimer = setInterval(tick, 1000);
 }
 
+function updatePaceHint(form) {
+  const out = form?.querySelector('#pace-hint');
+  if (!out) return;
+  const type = form.querySelector('[name=type]:checked')?.value;
+  const min = Number(form.elements.durationMin?.value);
+  const km = Number(form.elements.distanceKm?.value);
+  let text = '';
+  if (min && km && type === 'run') {
+    const r = profile().race;
+    const goal = r?.goalSec ? ` · Zielpace ${esc(RACE_DISTANCES[r.distanceKm || HM_KM] || 'Wettkampf')} ${fmtPace(r.goalSec / (r.distanceKm || HM_KM))} /km` : '';
+    text = `Pace ${fmtPace((min * 60) / km)} /km${goal}`;
+  } else if (min && km && type === 'swim') text = `Tempo ${fmtPace((min * 60) / (km * 10))} /100 m`;
+  else if (min && km && type === 'cycle') text = `${fmtNum(km / (min / 60), 1)} km/h`;
+  out.textContent = text;
+}
+
 /** Fill the strength form from a template: last values pre-filled, progression suggested. */
 function loadTemplate(form, tplId) {
   const p = profile();
@@ -685,6 +1453,7 @@ async function submitActivity(form) {
   if (exercises.length) common.exercises = exercises;
   if (type === 'strength' && fd.get('templateId')) common.templateId = fd.get('templateId');
   if (type === 'strength' && fd.getAll('warm').length) common.warmup = fd.getAll('warm').length;
+  if (type === 'swim' && fd.get('swimId')) common.swimId = fd.get('swimId');
   const newExercises = JSON.parse(form.dataset.newExercises || '[]').filter((n) => exercises.some((e) => e.id === n.id));
 
   const submit = form.querySelector('[type=submit]');
@@ -723,6 +1492,10 @@ async function submitActivity(form) {
         return prof;
       });
     }
+    clearTimeout(draftTimer);
+    draftTimer = null;
+    form.dataset.mode = 'saved';
+    if (type === 'strength' && mode === 'new') store.localSet('draft', null);
     sheet.close();
     toast(mode === 'new' ? 'Training gespeichert' : 'Änderungen gespeichert');
     await reload();
@@ -754,6 +1527,7 @@ function renderCoach() {
   if (!an) {
     return `${head}${demoBanner()}${pendingBanner()}
       ${emptyState('Noch keine Analyse', 'Drück auf «Jetzt analysieren» – Claude wertet dann alle Trainings und Gesundheitsdaten aus. Analysen laufen nur auf Knopfdruck.', '<button class="btn btn-primary" data-action="analyze">Jetzt analysieren</button>')}
+      ${reviewCard()}
       ${ask}`;
   }
 
@@ -792,7 +1566,9 @@ function renderCoach() {
     <section>
       <header class="section-head"><h2>Deine nächsten 7 Tage</h2><span class="muted small">Vorschlag vom Coach</span></header>
       <div class="plan-list">${(an.plan || []).map(planCard).join('')}</div>
+      <p class="muted small" style="margin-top:8px">Übernehmen kannst du die Vorschläge im <a class="link" href="#/plan">Plan</a>.</p>
     </section>
+    ${reviewCard()}
     ${ask}`;
 }
 
@@ -851,13 +1627,13 @@ function renderTrends() {
     weeks, from, prevFrom,
     acts: all.filter((a) => a.date >= from),
     prevActs: all.filter((a) => a.date >= prevFrom && a.date < from),
-    days: daily().filter((d) => d.date >= from),
-    prevDays: daily().filter((d) => d.date >= prevFrom && d.date < from),
+    days: healthDays().filter((d) => d.date >= from),
+    prevDays: healthDays().filter((d) => d.date >= prevFrom && d.date < from),
     weekStarts: Array.from({ length: weeks }, (_, i) => addDays(from, i * 7)),
   };
   // a sport gets its own tab as soon as it was recorded once (any time)
   const sportTabs = sportsIn(all);
-  const hasHealth = daily().length || Object.keys(checkins()).length;
+  const hasHealth = healthDays().length || Object.keys(checkins()).length;
   const tabs = [['overview', 'Übersicht'], ...(hasHealth ? [['health', '❤️ Gesundheit']] : []), ...sportTabs.map((t) => [t, `${sport(t).emoji} ${SPORT_LABELS[t]}`])];
   if (!tabs.some(([k]) => k === state.trendTab)) state.trendTab = 'overview';
   const tab = state.trendTab;
@@ -936,6 +1712,7 @@ const HEALTH = [
   { key: 'stress', label: 'Stress', unit: '', better: 'lower' },
   { key: 'bodyBatteryHigh', label: 'Body Battery (Max.)', unit: '', better: 'higher' },
   { key: 'steps', label: 'Schritte', unit: '', better: 'higher' },
+  { key: 'weightKg', label: 'Gewicht', unit: 'kg', fmt: (v) => fmtNum(v, 1), better: 'none' },
 ];
 
 function trendHealth(ctx) {
@@ -951,6 +1728,7 @@ function trendHealth(ctx) {
       const delta = cur - prev;
       const small = Math.abs(delta) < (h.key === 'sleepH' ? 0.1 : h.key === 'steps' ? 200 : 1);
       const good = h.better === 'higher' ? delta > 0 : delta < 0;
+      if (h.better === 'none') { trend = small ? '<span class="trend">→ wie davor</span>' : `<span class="trend">${delta > 0 ? '↑' : '↓'} ${f(Math.abs(delta))} vs. davor</span>`; return `<article class="kpi"><header><span>Ø ${esc(h.label)}</span></header><div class="kpi-value">${f(cur)}<small>${h.unit}</small></div>${trend}</article>`; }
       trend = small ? '<span class="trend">→ wie davor</span>' : `<span class="trend ${good ? 'good' : 'bad'}">${delta > 0 ? '↑' : '↓'} ${f(Math.abs(delta))} vs. davor</span>`;
     }
     return `<article class="kpi"><header><span>Ø ${esc(h.label)}</span></header><div class="kpi-value">${f(cur)}<small>${h.unit}</small></div>${trend}</article>`;
@@ -1007,6 +1785,7 @@ function trendHealth(ctx) {
       ${has('hrv') ? card('HRV (Nacht)', 'ms · höher = erholter', dailyLine(days, 'hrv', 'HRV', 'ms')) : ''}
       ${has('stress') ? card('Stress', 'Garmin 0–100 · Tagesschnitt', dailyLine(days, 'stress', 'Stress', '', { color: 'var(--warn)' })) : ''}
       ${has('bodyBatteryHigh') ? card('Body Battery', 'Höchstwert pro Tag', dailyLine(days, 'bodyBatteryHigh', 'Body Battery', '', { color: 'var(--good)' })) : ''}
+      ${has('weightKg') ? card('Körpergewicht', 'kg · Garmin und Check-in', dailyLine(days, 'weightKg', 'Gewicht', 'kg', { fmt: (v) => fmtNum(v, 1), color: 'var(--accent)' })) : ''}
       ${has('sleepScore') ? card('Schlaf-Score', '0–100', dailyLine(days, 'sleepScore', 'Score', '', { color: 'var(--sleep-rem)' })) : ''}
       ${stepsWeekly}
       ${ciChart}
@@ -1033,6 +1812,8 @@ function trendRun(ctx) {
     { color: 'var(--s-run)', xLabels: xLabels(hrRuns.map((r) => r.date)), yFormat: (v) => fmtNum(v, 2) }) : '';
   const snap = snapshot();
   const races = snap.racePredictions;
+  const race = profile().race;
+  const own = raceEstimate(activities(), race?.distanceKm || HM_KM);
   const longCols = card('Längster Lauf pro Woche', 'km', weekBars(ctx, runs, (w) => Math.max(0, ...w.map((a) => a.distanceKm || 0)), { unit: 'km', type: 'run' }));
   return `${statRow([
     [runs.length, 'Läufe'], [fmtNum(km, 1), `km${prevKm ? ` (davor ${fmtNum(prevKm, 0)})` : ''}`], [fmtDur(mins), 'Laufzeit'],
@@ -1043,6 +1824,11 @@ function trendRun(ctx) {
       ${card('Pace', 'Ø 5 Läufe · höher = schneller', paceChart)}
       ${eff ? card('Laufökonomie', 'Meter pro Herzschlag · höher = fitter', eff) : ''}
       ${longCols}
+      ${own ? card(`Prognose ${esc(RACE_DISTANCES[race?.distanceKm || HM_KM] || 'Halbmarathon')}`, 'aus deinen Läufen der letzten 8 Wochen', `<dl class="stat-grid">
+          <div><dt>Prognose</dt><dd>${fmtClock(Math.round(own.sec))}</dd></div>
+          <div><dt>Pace</dt><dd>${fmtPace(own.sec / (race?.distanceKm || HM_KM))} /km</dd></div>
+          ${race?.goalSec ? `<div><dt>Ziel</dt><dd>${fmtClock(race.goalSec)}</dd></div><div><dt>Differenz</dt><dd>${own.sec <= race.goalSec ? '−' : '+'}${fmtClock(Math.abs(Math.round(own.sec - race.goalSec)))}</dd></div>` : ''}
+        </dl><p class="muted small" style="margin-top:8px">Riegel-Formel ab dem besten Lauf ≥ 5 km (${esc(actTitle(own.run))}, ${esc(fmtDate(own.run.date, { day: 'numeric', month: 'short' }))}). Lockere Läufe werden über das RPE hochgerechnet – eher grobe Richtung als exakte Zeit.</p>`) : ''}
       ${races || snap.lactateThreshold || snap.vo2max ? card('Leistungswerte', 'Garmin', `<dl class="stat-grid">
           ${snap.vo2max ? `<div><dt>VO₂max</dt><dd>${fmtNum(snap.vo2max, 1)}</dd></div>` : ''}
           ${snap.lactateThreshold?.heartRate ? `<div><dt>Laktatschwelle</dt><dd>${snap.lactateThreshold.heartRate} bpm${snap.lactateThreshold.paceSecPerKm ? ` · ${fmtPace(snap.lactateThreshold.paceSecPerKm)}/km` : ''}</dd></div>` : ''}
@@ -1199,6 +1985,9 @@ function renderSettings() {
       </article>
 
       ${goalsCard(p)}
+      ${raceSettingsCard(p)}
+      ${remindersCard(p)}
+      ${stretchSettingsCard(p)}
       ${nutritionCard(p)}
       ${templatesCard(p)}
       ${exercisesCard(p)}
@@ -1330,6 +2119,7 @@ function templatesCard(p) {
     </form>`).join('')}
     <div class="form-actions">
       <button class="btn" data-action="tpl-new">${icon('plus', 16)}Neue Vorlage</button>
+      ${p.templates.length ? `<button class="btn" data-action="eval-start">${icon('target', 16)}Einstufung (Testtraining)</button>` : ''}
       ${PRESET_TEMPLATES.some((pt) => !p.templates.some((t) => t.id === pt.id)) ? `<button class="btn" data-action="tpl-preset">Kraftplan für Läufer A/B übernehmen</button>` : ''}
     </div>
   </article>`;
@@ -1560,7 +2350,7 @@ function applyTheme() {
 function buildNav() {
   const link = (r, cls) => `<a href="#/${r}" data-route="${r}" class="${cls}">${icon(ROUTES[r].icon, 22)}<span>${ROUTES[r].title}</span></a>`;
   $('#side-nav').innerHTML = Object.keys(ROUTES).map((r) => link(r, 'nav-link')).join('');
-  $('#tabbar').innerHTML = `${link('heute', 'tab')}${link('aktivitaeten', 'tab')}
+  $('#tabbar').innerHTML = `${link('heute', 'tab')}${link('plan', 'tab')}
     <button class="fab" data-action="add" aria-label="Training erfassen">${icon('plus', 26)}</button>
     ${link('coach', 'tab')}${link('trends', 'tab')}`;
   $('#topbar-actions').innerHTML = `<button class="icon-btn" data-action="sync" aria-label="Garmin synchronisieren">${icon('refresh')}</button>
@@ -1623,6 +2413,81 @@ const actions = {
   'ci-edit': () => { state.ciDraft = { ...(checkins()[todayISO()] || {}) }; render(); },
   'ci-cancel': () => { state.ciDraft = null; render(); },
   'trend-tab': (el) => { state.trendTab = el.dataset.tab; render(); },
+  // limits
+  'limit-new': () => openLimitForm(),
+  'limit-resolve': (el) => saveManual((m) => {
+    const l = (m.limits || []).find((x) => x.id === el.dataset.id);
+    if (l) { l.resolved = true; l.to = l.to && l.to < todayISO() ? l.to : todayISO(); }
+  }, 'Einschränkung beendet', 'Schön, dass du wieder fit bist!'),
+  // plan
+  'plan-view': (el) => { state.planView = el.dataset.view; render(); },
+  'plan-week': (el) => {
+    const step = Number(el.dataset.step);
+    state.planWeek = step === 0 ? null : addDays(state.planWeek || weekStart(todayISO()), step * 7);
+    state.planAdd = null; state.planMove = null; render();
+  },
+  'cal-month': (el) => { state.calMonth = el.dataset.month; render(); },
+  'cal-day': (el) => { state.planWeek = weekStart(el.dataset.date); state.planView = 'week'; render(); },
+  'plan-add': (el) => { state.planAdd = state.planAdd === el.dataset.date ? null : el.dataset.date; render(); $('.plan-add [name=title]')?.focus(); },
+  'plan-add-cancel': () => { state.planAdd = null; render(); },
+  'plan-move': (el) => { state.planMove = state.planMove === el.dataset.id ? null : el.dataset.id; render(); },
+  'plan-move-cancel': () => { state.planMove = null; render(); },
+  'plan-move-ok': (el) => {
+    const it = findPlanItem(el.dataset.id);
+    const date = $('#move-date')?.value;
+    state.planMove = null;
+    if (!it || !date || date === it.date) { render(); return; }
+    planPatch(it, { date, movedFrom: it.movedFrom || it.date }, `Plan: ${it.title || it.sport} → ${date}`, `Verschoben auf ${fmtDate(date)}`);
+  },
+  'plan-remove': (el) => {
+    const it = findPlanItem(el.dataset.id);
+    if (!it) return;
+    if (it.src === 'fix' && !confirm('Nur diesen einen Termin streichen? (Der feste Termin bleibt für die anderen Wochen.)')) return;
+    planPatch(it, { removed: true }, `Plan: ${it.title || it.sport} entfernt`, 'Aus dem Plan entfernt');
+  },
+  'plan-done': (el) => {
+    const it = findPlanItem(el.dataset.id);
+    if (!it) return;
+    if (!it.done && planDone(it, activities())) { toast('Schon erledigt – dazu gibt es ein erfasstes Training.'); return; }
+    planPatch(it, { done: !it.done || undefined }, `Plan: ${it.title || it.sport} ${it.done ? 'offen' : 'erledigt'}`);
+  },
+  'plan-take': (el) => {
+    const x = analysis()?.plan?.[Number(el.dataset.i)];
+    if (!x) return;
+    saveManual((m) => { m.plan = [...(m.plan || []), { id: newId('p'), date: x.date, sport: x.type, title: x.title, note: x.details || undefined, durationMin: x.durationMin || undefined, src: 'own', fromCoach: true }]; }, `Plan: Coach-Vorschlag ${x.title}`, 'In den Plan übernommen');
+  },
+  'plan-take-all': () => {
+    const own = manualData().plan || [];
+    const list = (analysis()?.plan || []).filter((x) => x.type !== 'rest' && x.date >= todayISO() && !own.some((o) => o.date === x.date && o.sport === x.type && o.title === x.title));
+    saveManual((m) => { m.plan = [...(m.plan || []), ...list.map((x) => ({ id: newId('p'), date: x.date, sport: x.type, title: x.title, note: x.details || undefined, durationMin: x.durationMin || undefined, src: 'own', fromCoach: true }))]; }, 'Plan: Coach-Vorschläge übernommen', `${list.length} Einheiten übernommen`);
+  },
+  'rec-remove': (el) => {
+    const r = (profile().recurring || []).find((x) => x.id === el.dataset.id);
+    if (!r || !confirm(`Festen Termin «${r.title || r.sport}» entfernen?`)) return;
+    saveProfile((p) => ({ ...p, recurring: (p.recurring || []).filter((x) => x.id !== r.id) }), 'Fester Termin entfernt');
+  },
+  'ics-plan': () => exportPlanIcs(),
+  'swim-log': (el) => openForm(null, { type: 'swim', swimId: el.dataset.swim, date: el.dataset.date }),
+  // stretching
+  'stretch-item': (el) => setStretch(todayISO(), (log) => {
+    const i = log.done.indexOf(el.dataset.id);
+    if (i >= 0) log.done.splice(i, 1); else log.done.push(el.dataset.id);
+  }),
+  'stretch-day': (el) => setStretch(el.dataset.date, (log) => {
+    log.complete = !log.complete;
+    log.done = log.complete ? stretchItems().map((i) => i.id) : [];
+  }),
+  'stretch-timer': (el) => startStretchTimer(el.dataset.id),
+  'st-row-add': (el) => el.closest('form').querySelector('.st-rows').insertAdjacentHTML('beforeend', stretchRow({ sec: 30 })),
+  'st-row-remove': (el) => el.closest('.st-row').remove(),
+  'st-suggest': (el) => { el.closest('form').querySelector('.st-rows').innerHTML = STRETCH_SUGGESTION.map(stretchRow).join(''); toast('Vorschlag geladen – anpassen und speichern'); },
+  // race
+  'race-clear': () => { if (confirm('Wettkampf entfernen?')) saveProfile((p) => { const { race, ...rest } = p; return rest; }, 'Wettkampf entfernt'); },
+  // evaluation & drafts
+  'eval-start': () => openEval(),
+  'draft-resume': () => resumeDraft(),
+  'draft-discard': () => { if (confirm('Angefangenes Training verwerfen?')) { store.localSet('draft', null); render(); } },
+  'review-run': () => runCoach('monthly'),
   'tpl-load': (el) => loadTemplate(el.closest('form'), el.dataset.id),
   'ex-decide': (el) => {
     const block = el.closest('.ex-block');
@@ -1682,6 +2547,20 @@ const forms = {
   'goals-form': submitGoals,
   'nutrition-form': submitNutrition,
   'exercise-form': submitExercise,
+  'limit-form': submitLimit,
+  'eval-form': submitEval,
+  'race-form': (form) => {
+    const fd = new FormData(form);
+    const race = JSON.parse(JSON.stringify({ name: fd.get('name').trim() || undefined, date: fd.get('date') || undefined, distanceKm: Number(fd.get('distanceKm')) || HM_KM, goalSec: parseClock(fd.get('goal')) || undefined }));
+    return saveProfile((p) => ({ ...p, race }), 'Wettkampf gespeichert');
+  },
+  'stretch-form': submitStretch,
+  'reminder-form': submitReminders,
+  'rec-form': (form) => {
+    const fd = new FormData(form);
+    const r = JSON.parse(JSON.stringify({ id: newId('r'), weekday: Number(fd.get('weekday')), sport: fd.get('sport'), title: fd.get('title').trim() || SPORTS[fd.get('sport')]?.label, templateId: fd.get('templateId') || undefined }));
+    return saveProfile((p) => ({ ...p, recurring: [...(p.recurring || []), r] }), `Fester Termin: ${r.title} jeden ${WEEKDAYS_LONG[r.weekday]}`);
+  },
   'ask-form': (form) => {
     const q = new FormData(form).get('q').trim();
     if (q) runCoach('question', q);
@@ -1691,10 +2570,19 @@ const forms = {
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-action]');
   if (el && actions[el.dataset.action]) actions[el.dataset.action](el, e);
+  const actForm = e.target.closest?.('#act-form');
+  if (actForm && el) saveDraftSoon(actForm);
 });
 document.addEventListener('submit', (e) => {
   if (forms[e.target.id]) { e.preventDefault(); forms[e.target.id](e.target); }
   else if (e.target.classList?.contains('tpl-form')) { e.preventDefault(); submitTemplate(e.target); }
+  else if (e.target.classList?.contains('plan-add')) {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const entry = JSON.parse(JSON.stringify({ id: newId('p'), date: e.target.dataset.date, sport: fd.get('sport'), title: fd.get('title').trim() || SPORTS[fd.get('sport')]?.label, templateId: fd.get('templateId') || undefined, src: 'own' }));
+    state.planAdd = null;
+    saveManual((m) => { m.plan = [...(m.plan || []), entry]; }, `Plan: ${entry.title} (${entry.date})`, 'Eingetragen');
+  }
 });
 document.addEventListener('input', (e) => {
   if (e.target.getAttribute?.('aria-invalid')) e.target.removeAttribute('aria-invalid');
@@ -1706,6 +2594,16 @@ document.addEventListener('input', (e) => {
     input.focus();
     input.setSelectionRange(pos, pos);
   }
+  const actForm = e.target.closest?.('#act-form');
+  if (actForm) {
+    saveDraftSoon(actForm);
+    if (['durationMin', 'distanceKm'].includes(e.target.name)) updatePaceHint(actForm);
+  }
+  const evalRow = e.target.closest?.('.eval-row');
+  if (evalRow) {
+    const kg = evalRowResult(evalRow);
+    evalRow.querySelector('.eval-out').innerHTML = kg ? `Start <strong>${fmtNum(kg, 1)} kg</strong>` : '–';
+  }
   if (e.target.name === 'rpe') {
     const v = Number(e.target.value);
     $('#rpe-out').textContent = v ? `${v} · ${RPE_LABELS[v]}` : 'nicht bewertet';
@@ -1714,6 +2612,18 @@ document.addEventListener('input', (e) => {
 document.addEventListener('change', (e) => {
   if (e.target.dataset.pref) store.savePrefs({ [e.target.dataset.pref]: e.target.checked });
   if (e.target.id === 'trend-ex') { state.trendExercise = e.target.value; render(); }
+  if (e.target.id === 'review-month') { state.reviewMonth = e.target.value; render(); }
+  if (e.target.dataset.swimFor) {
+    const it = findPlanItem(e.target.dataset.swimFor);
+    if (it) planPatch(it, { swimId: e.target.value }, 'Plan: Schwimmprogramm', `Programm: ${swimById(e.target.value)?.name}`);
+  }
+  const actForm = e.target.closest?.('#act-form');
+  if (actForm) {
+    saveDraftSoon(actForm);
+    if (e.target.name === 'type') updatePaceHint(actForm);
+    if (e.target.name === 'swimId' && e.target.value && !actForm.elements.distanceKm.value) actForm.elements.distanceKm.value = swimById(e.target.value).m / 1000;
+  }
+  if (e.target.name === 'kind' && e.target.closest('#limit-form')) e.target.closest('form').classList.toggle('is-ill', e.target.value === 'ill');
   if (e.target.name === 'ex' && e.target.closest('.tpl-row')) {
     const row = e.target.closest('.tpl-row');
     const ex = catalog(profile()).find((x) => x.id === e.target.value);
@@ -1728,6 +2638,13 @@ document.addEventListener('keydown', (e) => {
 });
 // close the sheet when tapping the backdrop
 sheet.addEventListener('click', (e) => { if (e.target === sheet) sheet.close(); });
+sheet.addEventListener('close', () => {
+  clearInterval(restTimer);
+  // flush a pending draft save and show the "unfinished session" banner
+  const form = sheet.querySelector('#act-form');
+  if (form && draftTimer) { clearTimeout(draftTimer); draftTimer = null; saveDraftSoon(form); }
+  setTimeout(() => { if (state.route === 'heute' && state.data) render(); }, 700);
+});
 
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {

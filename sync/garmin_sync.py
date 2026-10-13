@@ -194,6 +194,62 @@ def snapshot(api: Garmin) -> dict:
     return snap
 
 
+def _sport_from_item(item: dict) -> str:
+    key = (item.get("sportTypeKey") or (item.get("activityType") or {}).get("typeKey") or "").lower()
+    if not key and isinstance(item.get("sportType"), dict):
+        key = (item["sportType"].get("sportTypeKey") or "").lower()
+    sport = sport_for(key)
+    if sport == "other":
+        for word, s in (("run", "run"), ("lauf", "run"), ("marathon", "run"), ("swim", "swim"), ("cycl", "cycle"), ("bike", "cycle"),
+                        ("strength", "strength"), ("yoga", "mobility"), ("mobility", "mobility")):
+            if word in key or word in (item.get("title") or "").lower():
+                return s
+    return sport
+
+
+def planned_workouts(api: Garmin) -> list[dict]:
+    """Scheduled workouts from the Garmin calendar (training plans, Garmin Coach, manually scheduled), -7 … +35 days."""
+    today = date.today()
+    first, last = today - timedelta(days=7), today + timedelta(days=35)
+    months = sorted({(d.year, d.month) for d in (first, today, last)})
+    out: dict[str, dict] = {}
+    for year, month in months:
+        cal = safe(f"Garmin-Kalender {year}-{month:02d}", api.get_scheduled_workouts, year, month) or {}
+        for item in cal.get("calendarItems") or []:
+            kind = (item.get("itemType") or "").lower()
+            day = (item.get("date") or "")[:10]
+            if kind == "activity" or not day or not (first.isoformat() <= day <= last.isoformat()):
+                continue
+            if kind not in ("workout", "fbtadaptiveworkout", "trainingplan", "event", "race") and "workout" not in kind and not item.get("isRace"):
+                continue
+            entry = {
+                "id": f"gp{item.get('id') or item.get('workoutId') or day + (item.get('title') or '')}",
+                "date": day,
+                "title": item.get("title") or item.get("workoutName") or "Training",
+                "sport": _sport_from_item(item),
+                "kind": "race" if item.get("isRace") or kind in ("event", "race") else "workout",
+                "durationMin": num((item.get("duration") or item.get("estimatedDurationInSecs") or 0) / 60, 0) or None,
+                "distanceKm": num((item.get("distance") or item.get("estimatedDistanceInMeters") or 0) / 1000, 1) or None,
+                "plan": item.get("trainingPlanName") or ("Garmin Coach" if "fbt" in kind else None),
+                "description": (item.get("description") or "")[:400] or None,
+            }
+            out[entry["id"]] = {k: v for k, v in entry.items() if v not in (None, "")}
+    return sorted(out.values(), key=lambda e: e["date"])
+
+
+def weigh_ins(api: Garmin, days: int) -> dict[str, float]:
+    """Body weight per day (kg) from Garmin (scale or manual entries in Garmin Connect)."""
+    start = (date.today() - timedelta(days=days)).isoformat()
+    data = safe("Gewicht", api.get_weigh_ins, start, iso_today()) or {}
+    out: dict[str, float] = {}
+    for summary in data.get("dailyWeightSummaries") or []:
+        w = (summary.get("latestWeight") or {}).get("weight") or (summary.get("summaryDate") and summary.get("maxWeight"))
+        day = summary.get("summaryDate")
+        if day and w:
+            out[day] = round(w / 1000, 1) if w > 1000 else round(w, 1)
+    return out
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     logging.getLogger("garminconnect").setLevel(logging.WARNING)
@@ -227,8 +283,15 @@ def main() -> None:
         day = (date.today() - timedelta(days=offset)).isoformat()
         daily[day] = {**daily.get(day, {}), **daily_metrics(api, day)}
 
+    for day, kg in weigh_ins(api, max(days, 30)).items():
+        daily[day] = {**daily.get(day, {"date": day}), "weightKg": kg}
+
+    planned = planned_workouts(api)
+    log.info("%s geplante Garmin-Einheiten", len(planned))
+
     store.update(
         updatedAt=now_iso(),
+        planned=planned,
         activities=activities,
         daily=sorted(daily.values(), key=lambda d: d["date"])[-400:],
         snapshot={**store.get("snapshot", {}), **snapshot(api)},

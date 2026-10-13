@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       trigger:
-        description: "Auslöser (button, manual-entry, question)"
+        description: "Auslöser (button, manual-entry, question, monthly)"
         required: false
         default: button
+  # Monatsrückblick am 1. jedes Monats um ca. 7 Uhr Schweizer Zeit (läuft nur mit ANTHROPIC_API_KEY)
+  schedule:
+    - cron: "0 5 1 * *"
 
 concurrency:
   group: data-writes
@@ -46,11 +49,11 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-opus-5-5' }}
           COACH_EFFORT: ${{ vars.COACH_EFFORT || 'medium' }}
-          TRIGGER: ${{ inputs.trigger }}
+          TRIGGER: ${{ inputs.trigger || 'monthly' }}
         # the question is read from data/question.json in the private data repo (inputs are visible in public logs)
         run: python coach.py
 
       - name: Commit data
         env:
-          TRIGGER: ${{ inputs.trigger }}
+          TRIGGER: ${{ inputs.trigger || 'monthly' }}
         run: bash .github/scripts/commit-data.sh "Coach-Analyse ($TRIGGER)"

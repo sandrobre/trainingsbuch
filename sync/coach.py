@@ -139,6 +139,12 @@ PRINCIPLES = """Grundsätze:
   sick = krank) ist ein wichtiges Signal: Schmerz über 5 oder sick → keine intensive Einheit; mehrere Tage
   unter 2.5 im Schnitt → Belastung senken, auch wenn die Garmin-Werte gut aussehen.
 - Wochenziele (Einheiten pro Woche) sind Richtwerte des Athleten: plane so, dass sie erreichbar sind, ohne die Erholung zu opfern.
+- 'einschraenkungen' (Verletzung, krank, erschöpft mit betroffenen Bereichen) sind verbindlich: betroffene Belastung nicht
+  planen oder klar entschärfen; bei 'ill' keine intensiven Einheiten.
+- 'geplanteEinheiten': Läufe aus dem Garmin-Trainingsplan haben Vorrang – baue den Plan darum herum, verschiebe sie nur
+  mit Begründung. Feste Termine (z.B. Schwimmen) bleiben an ihrem Tag. Plane Kraft nicht am Tag vor einem langen Lauf
+  oder Tempolauf mit schweren Beinen.
+- Ist ein Rennen ('race' im Profil) eingetragen, richte den Plan auf die Phase bis zum Renntag aus (Aufbau, spezifisch, Tapering).
 - Gliedere die Tipps in 2-4 Bereiche ('focus'), passend zu Zielen und Sportarten, den wichtigsten zuerst.
   Erholung/Prävention bekommt einen eigenen Bereich, sofern es etwas Relevantes gibt.
 - Schreibe auf Deutsch in Schweizer Rechtschreibung (ss statt ß), direkt und motivierend, in der Du-Form."""
@@ -328,7 +334,51 @@ def compact_activity(a: dict) -> dict:
     return out
 
 
-def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, question: str) -> str:
+WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def upcoming_plan(garmin: dict, manual: dict, profile: dict, days: int = 14) -> list[dict]:
+    """Own plan entries, fixed weekly sessions and the Garmin training plan for the next days (overrides applied)."""
+    plan = manual.get("plan") or []
+    overridden = {p["recurOf"] for p in plan if p.get("recurOf")}
+    out = [{"datum": p["date"], "sport": p.get("sport"), "titel": p.get("title"), "quelle": "Garmin (verschoben)" if str(p.get("recurOf", "")).startswith("g:") else "eigener Plan"}
+           for p in plan if not p.get("removed") and p.get("date") and -1 <= -day_offset(p["date"]) < days]
+    for i in range(days):
+        d = date.today() + timedelta(days=i)
+        for r in profile.get("recurring") or []:
+            key = f"r:{r.get('id')}:{d.isoformat()}"
+            if r.get("weekday") == d.weekday() and key not in overridden:
+                out.append({"datum": d.isoformat(), "sport": r.get("sport"), "titel": r.get("title"), "quelle": f"fester Termin ({WEEKDAYS[d.weekday()]})"})
+    for g in garmin.get("planned") or []:
+        if f"g:{g.get('id')}" not in overridden and 0 <= -day_offset(g["date"]) < days:
+            out.append({"datum": g["date"], "sport": g.get("sport"), "titel": g.get("title"), "quelle": "Garmin-Trainingsplan" + (" (Wettkampf)" if g.get("kind") == "race" else ""),
+                        "dauerMin": g.get("durationMin"), "distanzKm": g.get("distanceKm")})
+    return sorted(out, key=lambda x: x["datum"])
+
+
+def weights(garmin: dict, manual: dict) -> dict:
+    merged = {d["date"]: d["weightKg"] for d in garmin.get("daily", []) if d.get("weightKg")}
+    merged.update(manual.get("weights") or {})
+    recent = {d: w for d, w in sorted(merged.items()) if day_offset(d) < 90}
+    if not recent:
+        return {}
+    vals = list(recent.values())
+    return {"aktuell": vals[-1], "vor90Tagen": vals[0], "anzahlMessungen": len(vals)}
+
+
+def month_data(garmin: dict, manual: dict, month: str) -> dict:
+    """Everything of one calendar month for the monthly review."""
+    acts = [compact_activity(a) for a in merged_activities(garmin, manual) if (a.get("date") or "").startswith(month)]
+    daily = [d for d in garmin.get("daily", []) if d["date"].startswith(month)]
+    checkins = {d: c for d, c in (manual.get("checkins") or {}).items() if d.startswith(month)}
+    stretch_days = sum(1 for d, v in (manual.get("stretch") or {}).items() if d.startswith(month) and v.get("complete"))
+    return {"monat": month, "aktivitaeten": acts,
+            "gesundheitSchnitt": {k: avg([d.get(k) for d in daily]) for k in ("restingHr", "hrv", "sleepH", "stress", "steps", "weightKg")},
+            "checkins": checkins or None, "dehnTage": stretch_days,
+            "einschraenkungen": [l for l in manual.get("limits") or [] if (l.get("from") or "")[:7] <= month <= (l.get("to") or "9999")[:7]] or None}
+
+
+def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, question: str, review_month: str = "") -> str:
     acts = merged_activities(garmin, manual)
     daily = garmin.get("daily", [])
     recent_acts = [compact_activity(a) for a in acts if a.get("date") and day_offset(a["date"]) < 42]
@@ -337,17 +387,33 @@ def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, ques
 
     sections = {
         "heute": f"{iso_today()} ({date.today().strftime('%A')})",
-        "athletenprofil": {k: v for k, v in profile.items() if k not in ("goals", "customExercises", "raceGoal", "templates")} or "nicht ausgefüllt",
+        "athletenprofil": {k: v for k, v in profile.items() if k not in ("goals", "customExercises", "raceGoal", "templates", "stretch", "recurring", "reminders")} or "nicht ausgefüllt",
         "kennzahlen": compute_metrics(acts, daily),
         "garminSnapshot": garmin.get("snapshot", {}),
         "aktivitaetenLetzte42Tage": recent_acts,
         "gesundheitLetzte21Tage": recent_daily,
         "checkinsLetzte14Tage": {d: c for d, c in sorted((manual.get("checkins") or {}).items()) if day_offset(d) < 14} or None,
+        "einschraenkungen": [l for l in manual.get("limits") or [] if not l.get("resolved") and (not l.get("to") or day_offset(l["to"]) <= 0) and day_offset(l.get("from") or iso_today()) < 60] or None,
+        "geplanteEinheiten": upcoming_plan(garmin, manual, profile) or None,
+        "dehnenLetzte14Tage": {"tageErledigt": sum(1 for d, v in (manual.get("stretch") or {}).items() if day_offset(d) < 14 and v.get("complete")),
+                               "uebungen": [i.get("name") for i in profile.get("stretch") or []]} if profile.get("stretch") or manual.get("stretch") else None,
+        "koerpergewicht": weights(garmin, manual) or None,
         "trainingsvorlagen": [{"name": t.get("name"), "uebungen": [i.get("id") for i in t.get("items", [])]} for t in profile.get("templates") or []] or None,
         "letzteAnalyse": {"datum": previous.get("generatedAt"), "zusammenfassung": last.get("summary"),
                            "plan": last.get("plan")} if last else None,
     }
     prompt = "Hier sind meine aktuellen Daten als JSON:\n\n" + json.dumps(sections, ensure_ascii=False, indent=1)
+    if review_month:
+        prompt += "\n\nDATEN DES RÜCKBLICK-MONATS:\n" + json.dumps(month_data(garmin, manual, review_month), ensure_ascii=False, indent=1)
+        prev = (date.fromisoformat(review_month + "-01") - timedelta(days=1)).strftime("%Y-%m")
+        pm = month_data(garmin, manual, prev)
+        acts_prev = pm.pop("aktivitaeten")
+        pm["proSportart"] = {t: {"einheiten": sum(1 for a in acts_prev if a.get("type") == t),
+                                  "minuten": round(sum(a.get("durationMin") or 0 for a in acts_prev if a.get("type") == t)),
+                                  "km": round(sum(a.get("distanceKm") or 0 for a in acts_prev if a.get("type") == t), 1)}
+                             for t in sorted({a.get("type") for a in acts_prev})}
+        pm.pop("checkins", None)
+        prompt += "\n\nVORMONAT ZUM VERGLEICH:\n" + json.dumps(pm, ensure_ascii=False)
     prompt += "\n\nErstelle deine Analyse und den Plan für die nächsten 7 Tage (ab heute)."
     if question:
         prompt += f"\n\nMeine Frage an dich (beantworte sie im Feld 'answer'):\n{question}"
@@ -404,6 +470,16 @@ def main() -> None:
     trigger = os.environ.get("TRIGGER") or "manual"
     pending = read_json("question.json", {})
     question = (os.environ.get("QUESTION") or pending.get("question") or "").strip()[:2000]
+    review_month = ""
+    if trigger == "monthly":
+        if not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("DRY_RUN"):
+            print("Kein ANTHROPIC_API_KEY – Monatsrückblick übersprungen.")
+            return
+        review_month = os.environ.get("REVIEW_MONTH") or (date.today().replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        question = (f"Schreibe meinen Monatsrückblick für {review_month} (Daten siehe 'DATEN DES RÜCKBLICK-MONATS'). "
+                    "Aufbau mit Markdown-Zwischentiteln: **Das lief gut**, **Zahlen im Vergleich zum Vormonat** (Einheiten, Stunden, Lauf-km, "
+                    "Kraftfortschritt, Schlaf, Ruhepuls/HRV, Gewicht, Check-ins, Dehnen), **Darauf achten**, **Fokus für den nächsten Monat** "
+                    "(2–3 konkrete Punkte). Ehrlich, motivierend, max. ca. 300 Wörter.")
 
     garmin = read_json("garmin.json", {})
     manual = read_json("manual.json", {})
@@ -415,7 +491,7 @@ def main() -> None:
     system = build_system(profile, sports)
     schema = build_schema(bool(profile["nutrition"].get("enabled")))
 
-    prompt = build_prompt(garmin, manual, profile, insights, question)
+    prompt = build_prompt(garmin, manual, profile, insights, question, review_month)
     if os.environ.get("DRY_RUN"):
         print(system, "\n\n", prompt)
         return
@@ -462,10 +538,13 @@ def main() -> None:
         history = [{"at": insights.get("generatedAt"), "summary": old.get("summary"),
                     "readiness": (old.get("readiness") or {}).get("score")}] + history
     qa = insights.get("qa", [])
-    if question:
+    reviews = insights.get("reviews", {})
+    if review_month:
+        reviews = {**reviews, review_month: {"text": analysis.get("answer", ""), "at": now_iso()}}
+    elif question:
         qa = [{"question": question, "answer": analysis.get("answer", ""), "at": now_iso()}] + qa
 
-    if pending.get("question"):
+    if pending.get("question") and not review_month:
         write_json("question.json", {})  # answered – clear it
     write_json("insights.json", {
         "generatedAt": now_iso(),
@@ -474,6 +553,7 @@ def main() -> None:
         "analysis": analysis,
         "supervisor": supervisor,
         "qa": qa[:30],
+        "reviews": dict(sorted(reviews.items())[-24:]),
         "history": history[:20],
     })
     usage = response.usage
