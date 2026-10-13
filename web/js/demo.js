@@ -53,7 +53,10 @@ export function demoData() {
         trainingLoad: Math.round(dur * (kind === 'tempo' ? 2.4 : 1.5)),
         aerobicTE: Math.round(jitter(kind === 'tempo' ? 3.6 : 2.8, 0.3) * 10) / 10,
         anaerobicTE: Math.round(jitter(kind === 'tempo' ? 1.8 : 0.4, 0.3) * 10) / 10,
-        cadence: Math.round(jitter(172, 3)),
+        cadence: Math.round(jitter(172 + progress * 3, 2)), strideCm: Math.round(jitter(kind === 'tempo' ? 118 : 104, 3)),
+        groundContactMs: Math.round(jitter(255 - progress * 8, 5)), verticalOscillationCm: Math.round(jitter(8.6, 0.3) * 10) / 10,
+        trainingEffectLabel: kind === 'tempo' ? 'THRESHOLD' : kind === 'long' ? 'AEROBIC_BASE' : 'RECOVERY',
+        lapsDetail: Array.from({ length: Math.floor(km) }, (_, i) => ({ km: 1, sec: Math.round(jitter(pace, 6)), pace: Math.round(jitter(pace, 6)), hr: Math.round(hr - 8 + i), cadence: Math.round(jitter(173, 2)) })),
         hrZonesMin: kind === 'tempo' ? [4, 8, 10, 18, 3].map((m) => Math.round(m * dur / 43)) : [6, 22, 10, 2, 0].map((m) => Math.round(m * dur / 40)),
       });
     }
@@ -80,6 +83,13 @@ export function demoData() {
       garminActs.push({
         id: `gdemow${back}`, source: 'garmin', type: 'swim', garminType: 'lap_swimming', title: 'Schwimmen Hallenbad',
         date, start: `${date}T07:00:00`, distanceKm: m / 1000, durationMin: Math.round((m / 100) * (2.4 - progress * 0.2)), avgHr: Math.round(jitter(132, 5)),
+        poolLengthM: 25, lengths: m / 25, swolf: Math.round(jitter(40 - progress * 4, 1.5)), avgStrokesPerLength: Math.round(jitter(19 - progress * 2, 0.8) * 10) / 10,
+        strokeRate: Math.round(jitter(29, 2)), paceSecPer100m: Math.round((2.25 - progress * 0.2) * 60 + jitter(0, 3)), trainingEffectLabel: 'AEROBIC_BASE',
+        lapsDetail: [
+          { km: 0.3, sec: 420, pace100: 140, stroke: 'MIXED', swolf: 42, strokes: 220, lengths: 12 }, { sec: 30, rest: true },
+          ...Array.from({ length: 6 }, () => ({ km: 0.1, sec: Math.round(jitter(118, 4)), pace100: Math.round(jitter(118, 4)), stroke: 'FREESTYLE', swolf: Math.round(jitter(37, 1)), strokes: 72, lengths: 4 })),
+          { sec: 60, rest: true }, { km: 0.2, sec: 300, pace100: 150, stroke: 'BACKSTROKE', swolf: 44, strokes: 160, lengths: 8 },
+        ],
       });
     }
     if (dow === 2 && back > 0) {
@@ -87,7 +97,12 @@ export function demoData() {
         id: `gdemos${back}`, source: 'garmin', type: 'strength', garminType: 'strength_training',
         title: 'Krafttraining Beine & Core', date, start: `${date}T07:00:00`, durationMin: Math.round(jitter(50, 8)),
         avgHr: Math.round(jitter(118, 6)), calories: Math.round(jitter(320, 40)), trainingLoad: Math.round(jitter(45, 10)),
-        exercises: strengthSession(progress),
+        exercises: back > 7 ? strengthSession(progress) : undefined,
+        garminSets: back <= 7 ? [
+          { category: 'SQUAT', name: 'BARBELL_BACK_SQUAT', reps: 5, kg: 85 }, { category: 'SQUAT', name: 'BARBELL_BACK_SQUAT', reps: 5, kg: 85 },
+          { category: 'DEADLIFT', name: 'ROMANIAN_DEADLIFT', reps: 8, kg: 72.5 }, { category: 'DEADLIFT', name: 'ROMANIAN_DEADLIFT', reps: 8, kg: 72.5 },
+          { category: 'PLANK', name: 'SIDE_PLANK', sec: 35 }, { category: 'CALF_RAISE', name: 'STANDING_CALF_RAISE', reps: 12, kg: 40 },
+        ] : undefined,
       });
     }
 
@@ -112,6 +127,10 @@ export function demoData() {
       bodyBattery: Math.round(jitter(65, 15)),
       stress: Math.round(jitter(28, 8)),
       steps: Math.round(jitter(9800, 2500)),
+      readiness: Math.round(jitter(70 - load * 15, 10)), spo2: Math.round(jitter(96, 1)), respiration: Math.round(jitter(14.5, 0.8) * 10) / 10,
+      sleepStress: Math.round(jitter(18, 5)), kcalActive: Math.round(jitter(750, 200)), floors: Math.round(jitter(9, 4)),
+      moderateMin: Math.round(jitter(25, 10)), vigorousMin: Math.round(jitter(12, 10)), hrvBaseLow: 54, hrvBaseHigh: 70,
+      sleepStart: `${rand() > 0.3 ? 23 : 0}:${String(Math.floor(rand() * 59)).padStart(2, '0')}`.replace(/^0:/, '00:'), sleepEnd: `06:${String(30 + Math.floor(rand() * 29)).padStart(2, '0')}`,
     });
   }
 
@@ -133,6 +152,15 @@ export function demoData() {
 
   return {
     garmin: {
+      records: [
+        { sport: 'run', label: 'Schnellste 5 km', kind: 'time', value: 1263, date: addDays(today, -3) },
+        { sport: 'run', label: 'Schnellste 10 km', kind: 'time', value: 2655, date: addDays(today, -40) },
+        { sport: 'run', label: 'Schnellster Halbmarathon', kind: 'time', value: 6012, date: addDays(today, -300) },
+        { sport: 'run', label: 'Längster Lauf', kind: 'distance', value: 21300, date: addDays(today, -300) },
+        { sport: 'swim', label: 'Schnellste 100 m', kind: 'time', value: 104, date: addDays(today, -20) },
+        { sport: 'swim', label: 'Längste Schwimmstrecke', kind: 'distance', value: 2000, date: addDays(today, -60) },
+        { sport: 'steps', label: 'Meiste Schritte (Tag)', kind: 'count', value: 31250, date: addDays(today, -90) },
+      ],
       planned: [
         { id: 'gpd1', date: addDays(today, 1), title: 'Intervalle 5 × 1 km', sport: 'run', kind: 'workout', durationMin: 55, plan: 'HM 1:45', description: '15′ einlaufen, 5 × 1 km @ 4:45/km, 2′ Trabpause, 10′ auslaufen' },
         { id: 'gpd2', date: addDays(today, 3), title: 'Lockerer Lauf', sport: 'run', kind: 'workout', durationMin: 45, plan: 'HM 1:45' },
