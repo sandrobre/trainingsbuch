@@ -16,6 +16,9 @@ import {
   HM_KM, RACE_DISTANCES, raceEstimate, racePhase, weeklyGoalStreak, dayStreak, SWIM, swimById, pickSwim,
   STRETCH_SUGGESTION, stretchMinutes, startKg, buildIcs,
 } from './planning.js';
+import {
+  READINESS_FACTORS, DEFAULT_WEIGHTS, READINESS_LEVEL, computeReadiness, readinessSeries, calibrate, READINESS_SOURCES,
+} from './readiness.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -285,9 +288,10 @@ function renderToday() {
     ${demoBanner()}${pendingBanner()}${draftBanner()}
     ${checkinCard()}
     ${todayCard(acts)}
+    ${appReadinessCard(acts)}
     ${readinessCard()}
     ${raceCard(acts)}
-    <section class="grid hero">${readiness}${brief}</section>
+    <section class="grid hero">${an ? readiness : ''}${brief}</section>
     ${weeklyCard(acts)}
     ${stretchCard()}
     <section class="kpis">${KPIS.map((k) => kpiTile(k, days)).join('')}${weightTile()}${vo2}</section>
@@ -514,6 +518,65 @@ function coachToday() {
     return '<p class="muted small">Die Ampel ist eine schnelle Einschätzung der App. Das letzte Wort hat der Coach – starte eine Analyse für seine Einschätzung.</p>';
   }
   return `<p class="coach-word">${icon('sparkles', 14)}<span><strong>Coach (${esc(relTime(ins.generatedAt))}):</strong> ${esc(an.readiness.label || '')}${an.readiness.score != null ? ` · ${an.readiness.score}/100` : ''}. Seine Einschätzung hat Vorrang.</span></p>`;
+}
+
+// ── own readiness ("App-Bereitschaft") ──
+const readinessWeights = () => ({ ...DEFAULT_WEIGHTS, ...(profile().readinessWeights || {}) });
+function appReadiness(day = todayISO(), acts = activities()) {
+  const byDate = new Map(healthDays().map((d) => [d.date, d]));
+  return computeReadiness({ day, byDate, checkins: checkins(), acts, weights: readinessWeights() });
+}
+const readyColor = (v) => (v >= 70 ? 'var(--good)' : v >= 50 ? 'var(--s-run)' : v >= 30 ? 'var(--warn)' : 'var(--bad)');
+
+function appReadinessCard(acts) {
+  const r = appReadiness(todayISO(), acts);
+  const w = readinessWeights();
+  const custom = !!profile().readinessWeights;
+  if (r.score == null) {
+    if (!healthDays().length && !Object.keys(checkins()).length) return '';
+    return `<article class="card app-ready"><p class="eyebrow">Bereitschaft (App)</p><p class="muted small">Noch zu wenig Daten für heute. Es braucht mindestens Check-in, HRV oder Schlaf und gut die Hälfte der Faktoren. Fehlt: ${esc(r.missing.join(', '))}.</p></article>`;
+  }
+  const cal = calibrate({ daily: healthDays(), checkins: checkins(), acts, endDay: todayISO() });
+  return `<article class="card app-ready">
+    <div class="rd-head">
+      ${ring(r.score, { size: 96, color: readyColor(r.score), label: r.level })}
+      <div><p class="eyebrow">Bereitschaft · App-Wert</p>
+        <h2>${esc(r.level)}</h2>
+        <p class="muted small">${r.coverage < 100 ? `Berechnet aus ${r.coverage} % der Faktoren – fehlt: ${esc(r.missing.join(', '))}. ` : ''}${!r.parts.checkin ? '<strong>Mach oben den Check-in</strong> – er ist der wichtigste Faktor. ' : ''}Eigene Berechnung, kein Garmin-Wert. Beeinflusst die Ampel nicht.</p></div>
+    </div>
+    <div class="rd-factors">${READINESS_FACTORS.map(([k, label]) => {
+      const p = r.parts[k];
+      return `<div class="rd-f${p ? '' : ' off'}"><span>${esc(label)} <em class="muted">${w[k]} %</em></span>
+        <span class="rd-bar"><i style="width:${p ? Math.max(3, p.value) : 0}%;background:${p ? readyColor(p.value) : 'transparent'}"></i></span>
+        <span class="muted small">${p ? Math.round(p.value) : '–'}</span>
+        ${p?.detail ? `<span class="rd-detail muted small">${esc(p.detail)}</span>` : ''}</div>`;
+    }).join('')}</div>
+    <details class="small rd-how"><summary>Wie wird das berechnet?</summary>
+      <p>Jeder Faktor bekommt 0–100 Punkte, gewichtet nach Stärke der Studienlage${custom ? ' (deine kalibrierten Gewichte)' : ''}. Fehlende Faktoren werden weggelassen, die übrigen hochgerechnet.</p>
+      <ul>${READINESS_FACTORS.map(([k, label, , text]) => `<li><strong>${esc(label)} (${w[k]} %)</strong>: ${esc(text)}</li>`).join('')}</ul>
+      <p>Die Gewichte sind eine begründete Rangfolge, kein gemessenes Modell – veröffentlichte, validierte Gewichte gibt es für solche Werte nicht (auch nicht von Garmin). ${cal.enough ? '' : `Ab 42 Tagen mit Check-in kann die App prüfen, welche Faktoren bei dir am besten passen (bisher ${cal.days}).`}</p>
+      <p>${READINESS_SOURCES.map(([t, u]) => `<a class="link" href="${esc(u)}" target="_blank" rel="noopener">${esc(t)}</a>`).join('<br>')}</p>
+    </details>
+    ${cal.enough ? `<div class="form-actions"><button class="btn btn-sm" data-action="ready-calibrate">${icon('target', 14)}Kalibrierung ansehen</button></div>` : ''}
+  </article>`;
+}
+
+function openCalibration() {
+  const cal = calibrate({ daily: healthDays(), checkins: checkins(), acts: activities(), endDay: todayISO() });
+  const w = readinessWeights();
+  openSheet(`<div class="sheet-body">
+    <header class="sheet-head"><div><h2>Kalibrierung</h2><p class="muted">${cal.days} Tage mit Check-in am Folgetag</p></div>
+      <button class="icon-btn" data-action="close-sheet" aria-label="Schliessen">${icon('close')}</button></header>
+    <p class="small">Die App prüft, wie stark jeder Faktor eines Tages mit deinem <strong>Befinden am nächsten Tag</strong> (Check-in) zusammenhängt. Je stärker der Zusammenhang, desto mehr Gewicht schlägt sie vor. Der Check-in selbst bleibt fix, weil er nicht mit sich selbst verglichen werden kann.</p>
+    <table class="review-table"><thead><tr><th>Faktor</th><th>Tage</th><th>Zusammenhang</th><th>jetzt</th><th>Vorschlag</th></tr></thead><tbody>
+      ${cal.factors.map((f) => `<tr><td>${esc(f.label)}</td><td>${f.n}</td><td>${f.fixed ? 'fix' : f.r == null ? 'zu wenig Daten' : `${f.r >= 0 ? '+' : ''}${f.r.toFixed(2)}`}</td><td>${w[f.key]} %</td><td><strong>${f.suggested} %</strong></td></tr>`).join('')}
+    </tbody></table>
+    <p class="muted small">Zusammenhang: −1 bis +1 (Korrelation). Unter ±0.1 ist er praktisch nicht vorhanden – dann bleibt der Faktor mit halbem Gewicht drin, statt ganz zu verschwinden. Das ist ein Hinweis, kein Beweis: Korrelation ist nicht Ursache.</p>
+    <footer class="sheet-actions">
+      ${profile().readinessWeights ? '<button class="btn" data-action="ready-reset">Standard-Gewichte</button>' : ''}
+      <button class="btn btn-primary" data-action="ready-apply" data-weights="${esc(JSON.stringify(Object.fromEntries(cal.factors.map((f) => [f.key, f.suggested]))))}">${icon('check', 16)}Vorschlag übernehmen</button>
+    </footer>
+  </div>`);
 }
 
 const READY_FACTORS = [['sleep', 'Schlaf letzte Nacht'], ['recovery', 'Erholungszeit'], ['hrv', 'HRV-Status'], ['load', 'Akute Belastung'], ['sleepHistory', 'Schlaf 3 Nächte'], ['stressHistory', 'Stress 3 Tage']];
@@ -1937,6 +2000,7 @@ function trendHealth(ctx) {
   if (!present.length && !ci.length) return emptyState('Keine Gesundheitsdaten im Zeitraum', 'Sobald Garmin synchronisiert oder du Check-ins machst, erscheinen sie hier.');
   return `<section class="kpis">${tiles}</section>
     <section class="grid two">
+      ${appReadinessTrend(ctx)}
       ${sleep}
       ${has('restingHr') ? card('Ruhepuls', 'bpm · tiefer = erholter', dailyLine(days, 'restingHr', 'Ruhepuls', 'bpm', { color: 'var(--bad)' })) : ''}
       ${has('hrv') ? card('HRV (Nacht)', 'ms · Band = dein Normalbereich laut Garmin', dailyLine(days, 'hrv', 'HRV', 'ms', { band: (() => { const b = [...days].reverse().find((d) => d.hrvBaseLow && d.hrvBaseHigh); return b ? { lo: b.hrvBaseLow, hi: b.hrvBaseHigh } : undefined; })() })) : ''}
@@ -1950,6 +2014,17 @@ function trendHealth(ctx) {
       ${ciChart}
       ${fitness}
     </section>`;
+}
+
+function appReadinessTrend(ctx) {
+  const days = [];
+  for (let d = ctx.from; d <= todayISO(); d = addDays(d, 1)) days.push(d);
+  const series = readinessSeries({ days, daily: healthDays(), checkins: checkins(), acts: activities(), weights: readinessWeights() }).filter((r) => r.score != null);
+  if (series.length < 2) return '';
+  return card('Bereitschaft (App)', `Ø ${Math.round(avg(series.map((r) => r.score)))} · eigene Berechnung`, line(series.map((r) => ({
+    x: ms(r.day), y: r.score,
+    tip: `<b>${esc(fmtDate(r.day))}</b><br>${r.score} · ${esc(r.level)}<br>${READINESS_FACTORS.filter(([k]) => r.parts[k]).map(([k, l]) => `${esc(l)}: ${Math.round(r.parts[k].value)}`).join('<br>')}`,
+  })), { color: 'var(--good)', xLabels: xLabels(series.map((r) => r.day)) }), 'wide');
 }
 
 const EXTRA_HEALTH = [
@@ -2744,6 +2819,9 @@ const actions = {
   'ci-edit': () => { state.ciDraft = { ...(checkins()[todayISO()] || {}) }; render(); },
   'ci-cancel': () => { state.ciDraft = null; render(); },
   'trend-tab': (el) => { state.trendTab = el.dataset.tab; render(); },
+  'ready-calibrate': () => openCalibration(),
+  'ready-apply': (el) => { sheet.close(); saveProfile((p) => ({ ...p, readinessWeights: JSON.parse(el.dataset.weights) }), 'Neue Gewichte übernommen'); },
+  'ready-reset': () => { sheet.close(); saveProfile((p) => { const { readinessWeights, ...rest } = p; return rest; }, 'Standard-Gewichte wiederhergestellt'); },
   // limits
   'limit-new': () => openLimitForm(),
   'limit-resolve': (el) => saveManual((m) => {
