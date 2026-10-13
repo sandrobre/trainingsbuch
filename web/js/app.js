@@ -284,7 +284,6 @@ function renderToday() {
       `<button class="btn" data-action="sync">${icon('refresh', 16)}<span>Sync</span></button><button class="btn btn-primary hide-mobile" data-action="add">${icon('plus', 16)}<span>Training</span></button>`)}
     ${demoBanner()}${pendingBanner()}${draftBanner()}
     ${checkinCard()}
-    ${recordsBanner()}
     ${todayCard(acts)}
     ${readinessCard()}
     ${raceCard(acts)}
