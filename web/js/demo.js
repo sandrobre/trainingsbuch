@@ -29,6 +29,8 @@ export function demoData() {
   const manualActs = [];
   const daily = [];
   const checkins = {};
+  const weights = {};
+  const stretch = {};
 
   for (let back = 83; back >= 0; back--) {
     const date = addDays(today, -back);
@@ -93,6 +95,8 @@ export function demoData() {
       const lvl = (v) => Math.max(1, Math.min(5, Math.round(jitter(v, 1))));
       checkins[date] = { energy: lvl(3.8), sleep: lvl(3.6), muscle: lvl(dow === 6 ? 2.6 : 3.7), stress: lvl(3.4), ...(back === 4 ? { pain: 3, painWhere: 'Achillessehne rechts' } : {}) };
     }
+    if (back % 3 === 0) weights[date] = Math.round(jitter(74.6 - progress * 1.2, 0.3) * 10) / 10;
+    if (back > 0 && back < 25 && rand() > 0.3) stretch[date] = { done: [], complete: true };
     const load = back % 7 === 1 ? 1 : 0;
     daily.push({
       date,
@@ -129,6 +133,11 @@ export function demoData() {
 
   return {
     garmin: {
+      planned: [
+        { id: 'gpd1', date: addDays(today, 1), title: 'Intervalle 5 × 1 km', sport: 'run', kind: 'workout', durationMin: 55, plan: 'HM 1:45', description: '15′ einlaufen, 5 × 1 km @ 4:45/km, 2′ Trabpause, 10′ auslaufen' },
+        { id: 'gpd2', date: addDays(today, 3), title: 'Lockerer Lauf', sport: 'run', kind: 'workout', durationMin: 45, plan: 'HM 1:45' },
+        { id: 'gpd3', date: addDays(today, 5), title: 'Langer Lauf 16 km', sport: 'run', kind: 'workout', distanceKm: 16, plan: 'HM 1:45' },
+      ],
       updatedAt: new Date(Date.now() - 42 * 60000).toISOString(),
       activities: garminActs.reverse(),
       daily,
@@ -140,7 +149,11 @@ export function demoData() {
         lactateThreshold: { heartRate: 171, paceSecPerKm: 268 },
       },
     },
-    manual: { activities: manualActs.reverse(), annotations: {}, checkins },
+    manual: {
+      activities: manualActs.reverse(), annotations: {}, checkins, weights, stretch,
+      limits: [{ id: 'ldemo', kind: 'injury', area: 'Achillessehne rechts', from: addDays(today, -3), affects: ['run'], note: 'Schmerz 3/10 am Morgen' }],
+      plan: [{ id: 'pdemo1', date: addDays(today, 2), sport: 'strength', title: 'Kraft A', templateId: 'tpl_a', src: 'own' }],
+    },
     profile: {
       name: '', age: 28, position: 'Zentrales Mittelfeld', level: 'Amateur (4. Liga)',
       trainingDays: 5, weightKg: 74, injuries: 'Leichte Achillessehnen-Reizung rechts im Frühling', maxHr: 194,
@@ -154,6 +167,8 @@ export function demoData() {
       nutrition: { enabled: true, diet: 'Alles', intolerances: '' },
       customExercises: [],
       weekly: { run: 3, football: 2, strength: 1, mobility: 1 },
+      recurring: [{ id: 'rdemo', weekday: 1, sport: 'swim', title: 'Schwimmen' }],
+      race: { name: 'Zürich Halbmarathon', date: addDays(today, 40), distanceKm: 21.0975, goalSec: 6300 },
     },
     insights: {
       generatedAt: new Date(Date.now() - 3 * 3600000).toISOString(),
