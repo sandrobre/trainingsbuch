@@ -327,8 +327,15 @@ def compute_metrics(acts: list[dict], daily: list[dict]) -> dict:
 
 def compact_activity(a: dict) -> dict:
     keys = ("date", "type", "title", "durationMin", "distanceKm", "paceSecPerKm", "avgHr", "maxHr",
-            "trainingLoad", "aerobicTE", "anaerobicTE", "hrZonesMin", "rpe", "feeling", "notes", "football", "source")
+            "trainingLoad", "aerobicTE", "anaerobicTE", "trainingEffectLabel", "hrZonesMin", "rpe", "feeling", "notes", "football", "source",
+            "elevationGain", "cadence", "strideCm", "groundContactMs", "avgPower", "avgSpeedKmh",
+            "paceSecPer100m", "poolLengthM", "lengths", "swolf", "avgStrokesPerLength", "strokeRate", "swimId", "eval")
     out = {k: a[k] for k in keys if a.get(k) not in (None, "", [], {})}
+    laps = [l for l in a.get("lapsDetail") or [] if not l.get("rest")]
+    if laps and a.get("type") in ("run", "swim") and day_offset(a["date"]) < 14:
+        out["runden"] = laps[:30]
+    if a.get("garminSets") and not a.get("exercises"):
+        out["saetzeVonUhr"] = a["garminSets"][:40]
     if a.get("exercises"):
         out["uebungen"] = [{"name": e["name"], "saetze": fmt_sets(e)} for e in a["exercises"]]
     return out
@@ -398,6 +405,7 @@ def build_prompt(garmin: dict, manual: dict, profile: dict, previous: dict, ques
         "dehnenLetzte14Tage": {"tageErledigt": sum(1 for d, v in (manual.get("stretch") or {}).items() if day_offset(d) < 14 and v.get("complete")),
                                "uebungen": [i.get("name") for i in profile.get("stretch") or []]} if profile.get("stretch") or manual.get("stretch") else None,
         "koerpergewicht": weights(garmin, manual) or None,
+        "rekorde": [{k: r.get(k) for k in ("sport", "label", "kind", "value", "date")} for r in garmin.get("records") or []] or None,
         "trainingsvorlagen": [{"name": t.get("name"), "uebungen": [i.get("id") for i in t.get("items", [])]} for t in profile.get("templates") or []] or None,
         "letzteAnalyse": {"datum": previous.get("generatedAt"), "zusammenfassung": last.get("summary"),
                            "plan": last.get("plan")} if last else None,

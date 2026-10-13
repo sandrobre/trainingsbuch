@@ -77,7 +77,7 @@ export function trafficLight({ limits = [], checkins = {}, acts = [], snapshot =
   const set = (l, text) => { lvl = Math.max(lvl, l); reasons.push({ level: l, text }); };
   const lims = activeLimits(limits, day);
   lims.filter((l) => l.kind === 'ill').forEach((l) => set(2, `Krank gemeldet${l.fever ? ' mit Fieber oder Symptomen unterhalb des Halses' : ''}: Erholung hat Vorrang.`));
-  lims.filter((l) => l.kind === 'injury').forEach((l) => set(1, `Verletzung${l.area ? ` (${l.area})` : ''}: betroffene Einheiten anpassen.`));
+  lims.filter((l) => l.kind === 'injury').forEach((l) => { set(1, `Verletzung${l.area ? ` (${l.area})` : ''}: betroffene Einheiten anpassen.`); reasons.at(-1).injury = true; });
   lims.filter((l) => l.kind === 'tired').forEach(() => set(1, 'Erschöpfung gemeldet: heute nur locker.'));
 
   const ci = checkins[day] || checkins[addDays(day, -1)];
@@ -103,7 +103,9 @@ export function trafficLight({ limits = [], checkins = {}, acts = [], snapshot =
   if (rd?.score != null && rd.score < 30) set(1, `Garmin Readiness tief (${rd.score}).`);
 
   if (!reasons.length) reasons.push({ level: 0, text: ratio != null ? `Keine Warnsignale, Belastung im grünen Bereich (Faktor ${ratio.toFixed(2)}).` : 'Keine Warnsignale.' });
-  return { level: ['green', 'yellow', 'red'][lvl], label: ['Bereit', 'Vorsicht', 'Erholung'][lvl], reasons, ratio, streak };
+  // level without injuries: an injury only matters for the sessions it affects (see conflicts())
+  const general = Math.max(0, ...reasons.filter((r) => !r.injury).map((r) => r.level));
+  return { level: ['green', 'yellow', 'red'][lvl], label: ['Bereit', 'Vorsicht', 'Erholung'][lvl], generalLevel: ['green', 'yellow', 'red'][general], reasons, ratio, streak };
 }
 
 // ── weekly plan: own entries + fixed weekly sessions + Garmin plan, with overrides ──
@@ -131,6 +133,22 @@ export function planItems({ plan = [], recurring = [], garminPlanned = [], from,
 }
 
 /** A planned session counts as done when it is ticked or an activity of that sport exists on that day. */
+/**
+ * Traffic-light hint for one planned session (only a hint – the plan itself is never changed).
+ * Yellow: hard sessions easy, long sessions shorter. Red: replace with rest, a walk or mobility.
+ */
+export function sessionHint(item, level) {
+  if (!level || level === 'green' || ['mobility', 'walk'].includes(item.sport)) return null;
+  const t = `${item.title || ''} ${item.note || ''}`;
+  const hard = item.sport === 'hiit' || item.race || /intervall|interval|tempo|schwelle|threshold|sprint|vo2|hart|match|wettkampf|race|hügel|berg/i.test(t);
+  const long = /lang|long/i.test(t) || (item.distanceKm || 0) >= 14 || (item.durationMin || 0) >= 80;
+  if (level === 'red') return 'Ampel rot: heute besser durch Ruhe, einen Spaziergang oder Mobility ersetzen.';
+  if (item.sport === 'strength') return 'Ampel gelb: Gewichte nur steigern, wenn es sich gut anfühlt – lieber sauber als schwer.';
+  if (hard) return 'Ampel gelb: heute locker statt hart – oder auf einen besseren Tag schieben.';
+  if (long) return 'Ampel gelb: Umfang um etwa ein Drittel kürzen und locker bleiben.';
+  return 'Ampel gelb: ruhig angehen, Tempo nach Gefühl.';
+}
+
 export const planDone = (item, acts) => !!item.done || acts.some((a) => a.date === item.date && (a.type === item.sport || (item.sport === 'mobility' && a.type === 'mobility')));
 
 // ── race ──

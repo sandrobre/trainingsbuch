@@ -156,7 +156,7 @@ export function setRow(set = {}, unit) {
 
 export function exerciseBlock(exercise, last, plan) {
   const sets = exercise.sets?.length ? exercise.sets : [{}];
-  const p = plan ? ` data-plan="${esc(JSON.stringify({ target: plan.target, sugg: plan.sugg }))}" data-decision="${esc(plan.decision || '')}"` : '';
+  const p = plan ? ` data-plan="${esc(JSON.stringify({ target: plan.target, sugg: plan.sugg, note: plan.note || undefined }))}" data-decision="${esc(plan.decision || '')}"` : '';
   return `<div class="ex-block" data-ex-id="${esc(exercise.id)}" data-ex-name="${esc(exercise.name)}" data-ex-group="${esc(exercise.group || 'Eigene')}" data-ex-unit="${esc(exercise.unit || '')}"${p}>
     <header>
       <div><strong>${esc(exercise.name)}</strong>
@@ -288,7 +288,7 @@ export function suggBox(plan, unit) {
   if (s.type === 'up') buttons = btn('up', `Auf ${kgf(s.to)} kg steigern`) + btn('hold', `Beim Gewicht bleiben (${kgf(s.from)} kg)`);
   if (s.type === 'time') buttons = btn('up', `${fmtSec(s.to)} halten`) + btn('hold', `Wie letztes Mal (${fmtSec(s.from)})`);
   if (s.type === 'down') buttons = btn('down', `Auf ${kgf(s.to)} kg reduzieren`) + btn('keep', 'Gewicht behalten');
-  return `<div class="sugg sugg-${esc(s.type || 'none')}"><p>${esc(s.text || '')}</p>${buttons ? `<div class="ex-actions">${buttons}</div>` : ''}</div>`;
+  return `<div class="sugg sugg-${esc(s.type || 'none')}"><p>${esc(s.text || '')}</p>${plan.note ? `<p class="sugg-note">⚠︎ ${esc(plan.note)}</p>` : ''}${buttons ? `<div class="ex-actions">${buttons}</div>` : ''}</div>`;
 }
 
 /** Template preset: the runner-friendly strength plan A/B (heavy legs, jumps, single-leg, calves, hips, shoulders). */

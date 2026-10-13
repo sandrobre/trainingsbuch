@@ -12,7 +12,7 @@ import {
   PRESET_TEMPLATES, PRESET_EXERCISES, targetText, WEEKLY_SPORTS, CHECKIN, checkinScore,
 } from './training.js';
 import {
-  LIMIT_KIND, LIMIT_SHORT, AFFECTS, activeLimits, conflicts, templateParts, trafficLight, planItems, planDone,
+  LIMIT_KIND, LIMIT_SHORT, AFFECTS, activeLimits, conflicts, templateParts, trafficLight, planItems, planDone, sessionHint,
   HM_KM, RACE_DISTANCES, raceEstimate, racePhase, weeklyGoalStreak, dayStreak, SWIM, swimById, pickSwim,
   STRETCH_SUGGESTION, stretchMinutes, startKg, buildIcs,
 } from './planning.js';
@@ -284,6 +284,7 @@ function renderToday() {
       `<button class="btn" data-action="sync">${icon('refresh', 16)}<span>Sync</span></button><button class="btn btn-primary hide-mobile" data-action="add">${icon('plus', 16)}<span>Training</span></button>`)}
     ${demoBanner()}${pendingBanner()}${draftBanner()}
     ${checkinCard()}
+    ${recordsBanner()}
     ${todayCard(acts)}
     ${raceCard(acts)}
     <section class="grid hero">${readiness}${brief}</section>
@@ -491,6 +492,7 @@ function planRow(it, acts, L, opts = {}) {
       ${meta.length ? `<div class="muted small">${esc(meta.join(' · '))}</div>` : ''}
       ${it.note ? `<details><summary class="small">Details</summary><p class="small pre">${esc(it.note)}</p></details>` : ''}
       ${conf.map((l) => `<p class="small warn-text">${icon('alert', 13)} Betroffen: ${esc(LIMIT_SHORT[l.kind])}${l.area ? ` (${esc(l.area)})` : ''} – anpassen oder verschieben</p>`).join('')}
+      ${(() => { const lvl = conf.length ? L.level : L.generalLevel; const h = it.date === todayISO() && !done && sessionHint(it, lvl); return h ? `<p class="small tl-hint tl-${lvl}">${icon('alert', 13)} ${esc(h)}</p>` : ''; })()}
       ${longRunNext && tpl && templateParts(tpl, catalog(p)).lower ? '<p class="small warn-text">Am Tag vor einem langen oder harten Lauf: Beine leichter oder Tag tauschen.</p>' : ''}
       ${sw ? `<details class="swim-prog"><summary class="small">🏊 ${esc(sw.name)} · ${fmtNum(sw.m)} m · ${esc(sw.focus)}${it.swimId ? '' : ' (Vorschlag)'}</summary><p class="small pre">${esc(sw.desc)}</p>
         ${opts.edit !== false ? `<select class="mini-select" data-swim-for="${esc(it.id)}" aria-label="Programm wählen">${SWIM.map((s) => `<option value="${s.id}" ${s.id === sw.id ? 'selected' : ''}>${esc(s.name)} (${s.m} m)</option>`).join('')}</select>` : ''}</details>` : ''}
@@ -502,6 +504,16 @@ function planRow(it, acts, L, opts = {}) {
       <button class="icon-btn sm" data-action="plan-remove" data-id="${esc(it.id)}" aria-label="Aus dem Plan entfernen" title="Entfernen">${icon('close', 16)}</button>
     </div>` : ''}
   </div>`;
+}
+
+/** The coach has the last word: show today's coach assessment next to the traffic light. */
+function coachToday() {
+  const ins = state.data?.insights;
+  const an = ins?.analysis;
+  if (!an?.readiness || !ins.generatedAt || ins.generatedAt.slice(0, 10) !== todayISO()) {
+    return '<p class="muted small">Die Ampel ist eine schnelle Einschätzung der App. Das letzte Wort hat der Coach – starte eine Analyse für seine Einschätzung.</p>';
+  }
+  return `<p class="coach-word">${icon('sparkles', 14)}<span><strong>Coach (${esc(relTime(ins.generatedAt))}):</strong> ${esc(an.readiness.label || '')}${an.readiness.score != null ? ` · ${an.readiness.score}/100` : ''}. Seine Einschätzung hat Vorrang.</span></p>`;
 }
 
 function todayCard(acts) {
@@ -516,6 +528,7 @@ function todayCard(acts) {
       <button class="btn btn-sm" data-action="limit-new">${icon('alert', 14)}<span>Einschränkung melden</span></button>
     </header>
     <ul class="tl-reasons">${L.reasons.map((r) => `<li class="l${r.level}">${esc(r.text)}</li>`).join('')}</ul>
+    ${coachToday()}
     ${lims.length ? `<div class="limits">${lims.map(limitChip).join('')}</div>` : ''}
     <header class="card-head sub-head"><h3>Heute geplant</h3><a class="link" href="#/plan">Wochenplan ${icon('chevron', 14)}</a></header>
     ${items.length ? `<div class="plan-items">${items.map((it) => planRow(it, acts, L)).join('')}</div>`
@@ -1181,8 +1194,32 @@ function openActivity(id) {
     ['Training Load', a.trainingLoad],
     ['Aerober TE', a.aerobicTE],
     ['Anaerober TE', a.anaerobicTE],
-    ['Höhenmeter', a.elevationGain && `${a.elevationGain} m`],
+    ['Höhenmeter', a.elevationGain && `${a.elevationGain} m${a.elevationLoss ? ` / −${a.elevationLoss} m` : ''}`],
+    ['Bewegungszeit', a.movingMin && a.movingMin < (a.durationMin || 0) - 0.5 && fmtDur(a.movingMin)],
+    ['Ø Tempo', a.avgSpeedKmh && ['cycle', 'other', 'walk'].includes(a.type) && `${fmtNum(a.avgSpeedKmh, 1)} km/h`],
+    ['Max. Tempo', a.maxSpeedKmh && a.type === 'cycle' && `${fmtNum(a.maxSpeedKmh, 1)} km/h`],
     ['Kadenz', a.cadence && `${a.cadence} spm`],
+    ['Schrittlänge', a.strideCm && `${fmtNum(a.strideCm / 100, 2)} m`],
+    ['Bodenkontakt', a.groundContactMs && `${a.groundContactMs} ms`],
+    ['Vert. Oszillation', a.verticalOscillationCm && `${fmtNum(a.verticalOscillationCm, 1)} cm`],
+    ['Vert. Verhältnis', a.verticalRatio && `${fmtNum(a.verticalRatio, 1)} %`],
+    ['Ø Leistung', a.avgPower && `${a.avgPower} W${a.normPower ? ` (NP ${a.normPower} W)` : ''}`],
+    ['Trittfrequenz', a.bikeCadence && `${a.bikeCadence} U/min`],
+    ['Pace /100 m', a.paceSecPer100m && `${fmtPace(a.paceSecPer100m)} /100 m`],
+    ['Becken', a.poolLengthM && `${fmtNum(a.poolLengthM)} m`],
+    ['Bahnen', a.lengths],
+    ['SWOLF', a.swolf],
+    ['Züge', a.strokes && `${a.strokes}${a.avgStrokesPerLength ? ` (Ø ${fmtNum(a.avgStrokesPerLength, 1)} / Bahn)` : ''}`],
+    ['Zugrate', a.strokeRate && `${a.strokeRate} /min`],
+    ['Distanz pro Zug', a.strokeDistanceM && `${fmtNum(a.strokeDistanceM, 2)} m`],
+    ['Sätze (Uhr)', a.activeSets && `${a.activeSets}${a.totalReps ? ` · ${a.totalReps} Wdh.` : ''}`],
+    ['Schritte', a.steps && fmtNum(a.steps)],
+    ['Ø Atmung', a.avgRespiration && `${fmtNum(a.avgRespiration, 1)} /min`],
+    ['Temperatur', a.maxTempC != null && a.minTempC != null && `${fmtNum(a.minTempC)}–${fmtNum(a.maxTempC)} °C`],
+    ['Intensitätsminuten', (a.moderateMin || a.vigorousMin) && `${(a.moderateMin || 0) + 2 * (a.vigorousMin || 0)}`],
+    ['Body Battery', a.bodyBatteryImpact && `${a.bodyBatteryImpact > 0 ? '+' : ''}${a.bodyBatteryImpact}`],
+    ['Schweiss (geschätzt)', a.sweatMl && `${fmtNum(a.sweatMl)} ml`],
+    ['Ort', a.location],
     ['RPE', a.rpe && `${a.rpe}/10 · ${RPE_LABELS[a.rpe]}`],
     ['Gefühl', a.feeling && `${FEELINGS[a.feeling]} ${a.feeling}/5`],
   ].filter(([, v]) => v);
@@ -1215,6 +1252,9 @@ function openActivity(id) {
     </header>
     <dl class="stat-grid">${[...stats, ...footballStats].map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
     ${exercisesHtml}
+    ${a.trainingEffectLabel ? `<p class="small muted te-label">Trainingseffekt laut Garmin: <strong>${esc(TE_LABELS[a.trainingEffectLabel] || a.trainingEffectLabel.toLowerCase().replaceAll('_', ' '))}</strong></p>` : ''}
+    ${lapsTable(a)}
+    ${garminSetsBlock(a)}
     ${zones ? `<h3 class="sub">Herzfrequenzzonen</h3>${zones}` : ''}
     ${a.notes ? `<h3 class="sub">Notizen</h3><p>${esc(a.notes)}</p>` : ''}
     <footer class="sheet-actions">
@@ -1224,6 +1264,72 @@ function openActivity(id) {
            <button class="btn btn-primary" data-action="edit-activity" data-id="${esc(a.id)}">${icon('edit', 16)}Bearbeiten</button>`}
     </footer>
   </div>`);
+}
+
+const TE_LABELS = {
+  RECOVERY: 'Erholung', BASE: 'Grundlage', AEROBIC_BASE: 'Grundlage', TEMPO: 'Tempo', THRESHOLD: 'Schwelle', LACTATE_THRESHOLD: 'Schwelle',
+  VO2MAX: 'VO₂max', ANAEROBIC_CAPACITY: 'Anaerob', SPEED: 'Schnelligkeit', SPRINT: 'Sprint', NO_BENEFIT: 'kein Trainingseffekt', ANAEROBIC: 'Anaerob',
+};
+const STROKES = { FREESTYLE: 'Kraul', BACKSTROKE: 'Rücken', BREASTSTROKE: 'Brust', BUTTERFLY: 'Delfin', MIXED: 'Gemischt', IM: 'Lagen', DRILL: 'Technik' };
+
+function lapsTable(a) {
+  const laps = a.lapsDetail || [];
+  if (!laps.length) return '';
+  if (a.type === 'swim') {
+    let n = 0;
+    return `<h3 class="sub">Intervalle</h3><div class="table-wrap"><table class="laps"><thead><tr><th>#</th><th>Distanz</th><th>Zeit</th><th>/100 m</th><th>Lage</th><th>SWOLF</th><th>Züge</th></tr></thead><tbody>
+      ${laps.map((l) => (l.rest ? `<tr class="rest"><td></td><td colspan="6">Pause ${fmtClock(l.sec)}</td></tr>`
+        : `<tr><td>${n += 1}</td><td>${fmtNum((l.km || 0) * 1000)} m</td><td>${fmtClock(l.sec)}</td><td>${l.pace100 ? fmtPace(l.pace100) : '–'}</td><td>${esc(STROKES[l.stroke] || l.stroke || '–')}</td><td>${l.swolf ?? '–'}</td><td>${l.strokes ?? '–'}</td></tr>`)).join('')}
+    </tbody></table></div>`;
+  }
+  const hasPace = laps.some((l) => l.pace);
+  return `<h3 class="sub">Runden</h3><div class="table-wrap"><table class="laps"><thead><tr><th>#</th><th>Distanz</th><th>Zeit</th>${hasPace ? '<th>Pace</th>' : ''}<th>Ø Puls</th>${laps.some((l) => l.cadence) ? '<th>Kadenz</th>' : ''}${laps.some((l) => l.power) ? '<th>Watt</th>' : ''}${laps.some((l) => l.elev) ? '<th>Hm</th>' : ''}</tr></thead><tbody>
+    ${laps.map((l, i) => `<tr><td>${i + 1}</td><td>${l.km ? `${fmtNum(l.km, 2)} km` : '–'}</td><td>${fmtClock(l.sec)}</td>${hasPace ? `<td>${l.pace ? fmtPace(l.pace) : '–'}</td>` : ''}<td>${l.hr ?? '–'}</td>${laps.some((x) => x.cadence) ? `<td>${l.cadence ?? '–'}</td>` : ''}${laps.some((x) => x.power) ? `<td>${l.power ?? '–'}</td>` : ''}${laps.some((x) => x.elev) ? `<td>${l.elev ?? '–'}</td>` : ''}</tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+// Garmin strength sets → app exercises (best effort by name; unknown ones become own exercises)
+const GARMIN_EX = [
+  [/front_squat/, 'front_squat'], [/goblet/, 'goblet_squat'], [/leg_press/, 'leg_press'], [/split_squat|bulgarian/, 'bulgarian_split_squat'],
+  [/single_leg_squat|pistol/, 'single_leg_squat'], [/squat/, 'squat'], [/lunge/, 'lunge'], [/step_up/, 'step_up'],
+  [/leg_extension/, 'leg_extension'], [/nordic/, 'nordic_curl'], [/leg_curl/, 'leg_curl'], [/seated_calf/, 'c_wadenheben_sitzend'], [/calf/, 'calf_raise'],
+  [/single_leg.*(deadlift|rdl)/, 'single_leg_rdl'], [/romanian|rdl|stiff_leg/, 'romanian_deadlift'], [/deadlift/, 'deadlift'],
+  [/hip_thrust/, 'hip_thrust'], [/glute_bridge|hip_raise/, 'glute_bridge'], [/swing/, 'kettlebell_swing'], [/good_morning/, 'good_morning'],
+  [/incline.*bench|incline.*press/, 'incline_bench'], [/dumbbell.*bench|db_bench/, 'db_bench'], [/bench_press/, 'bench_press'],
+  [/push_up/, 'push_up'], [/dip/, 'dips'], [/fly/, 'chest_fly'], [/pull_up|chin_up/, 'pull_up'], [/pulldown/, 'lat_pulldown'],
+  [/face_pull/, 'face_pull'], [/(one_arm|dumbbell).*row/, 'db_row'], [/cable.*row|seated_row/, 'cable_row'], [/row/, 'barbell_row'],
+  [/back_extension|hyperextension/, 'back_extension'], [/dumbbell.*shoulder_press|dumbbell.*overhead/, 'db_shoulder_press'],
+  [/shoulder_press|overhead_press|military/, 'overhead_press'], [/lateral_raise/, 'lateral_raise'], [/reverse_fly|rear_delt/, 'reverse_fly'],
+  [/hammer_curl/, 'hammer_curl'], [/curl/, 'biceps_curl'], [/triceps|pushdown|skull/, 'triceps_pushdown'],
+  [/side_plank/, 'side_plank'], [/copenhagen/, 'copenhagen'], [/plank/, 'plank'], [/dead_bug/, 'dead_bug'], [/pallof/, 'pallof_press'],
+  [/hanging.*leg_raise|leg_raise/, 'hanging_leg_raise'], [/ab_wheel|rollout/, 'ab_wheel'], [/russian_twist/, 'russian_twist'],
+  [/box_jump/, 'box_jump'], [/broad_jump/, 'broad_jump'], [/jump/, 'pogo_jump'],
+];
+const prettyGarmin = (s) => String(s || 'Übung').toLowerCase().split('_').map((w) => w[0]?.toUpperCase() + w.slice(1)).join(' ');
+
+function garminSetsToExercises(sets) {
+  const cat = catalog(profile());
+  const out = [];
+  for (const st of sets) {
+    const key = `${st.category || ''} ${st.name || ''}`.toLowerCase();
+    const hit = GARMIN_EX.find(([re]) => re.test(key));
+    let ex = hit && cat.find((e) => e.id === hit[1]);
+    if (!ex) ex = { id: `c_${slug(prettyGarmin(st.name || st.category))}`, name: prettyGarmin(st.name || st.category), group: 'Eigene' };
+    const timed = ex.unit === 's';
+    const set = timed ? { reps: st.sec || st.reps } : { kg: st.kg || undefined, reps: st.reps };
+    const last = out.at(-1);
+    if (last?.id === ex.id) last.sets.push(set); else out.push({ id: ex.id, name: ex.name, group: ex.group, ...(timed ? { unit: 's' } : {}), sets: [set] });
+  }
+  return out;
+}
+
+function garminSetsBlock(a) {
+  if (!a.garminSets?.length) return '';
+  const ex = garminSetsToExercises(a.garminSets);
+  return `<h3 class="sub">Sätze von der Uhr</h3>
+    <div class="ex-summary">${ex.map((e) => `<div class="ex-line"><div><strong>${esc(e.name)}</strong></div><span>${esc(fmtSets(e.sets, e.unit))}</span></div>`).join('')}</div>
+    ${a.exercises?.length ? '' : `<div class="form-actions"><button class="btn btn-sm" data-action="garmin-sets-take" data-id="${esc(a.id)}">${icon('check', 14)}Als Übungen übernehmen</button></div>`}
+    <p class="muted small">Garmin erkennt Übungen automatisch – nicht immer richtig. Nach dem Übernehmen kannst du sie unter «Ergänzen» korrigieren.</p>`;
 }
 
 function openForm(existing, opts = {}) {
@@ -1415,6 +1521,20 @@ function loadTemplate(form, tplId) {
   form.elements.templateId.value = t.id;
   form.querySelectorAll('[data-action=tpl-load]').forEach((b) => b.classList.toggle('btn-primary', b.dataset.id === t.id));
   let warm = 0;
+  const L = light();
+  const lims = activeLimits(limitsList()).filter((l) => l.kind !== 'tired');
+  const hintFor = (ex) => {
+    const notes = [];
+    if (L.generalLevel === 'red') notes.push(`Ampel rot (${L.reasons[0]?.text || ''}) – heute eher leicht oder Pause. Du entscheidest.`);
+    else if (L.generalLevel === 'yellow') notes.push('Ampel gelb – Steigerung nur, wenn es sich gut anfühlt.');
+    const upper = ['Brust', 'Rücken', 'Schultern', 'Arme'].includes(ex.group);
+    const lower = ['Beine', 'Gesäss & Hüfte', 'Prävention & Sprung'].includes(ex.group);
+    for (const l of lims) {
+      const a = l.affects || [];
+      if (l.kind === 'ill' || (upper && a.includes('liftUpper')) || (lower && a.includes('liftLower'))) notes.push(`${LIMIT_SHORT[l.kind]}${l.area ? ` (${l.area})` : ''}: Übung anpassen oder weglassen.`);
+    }
+    return notes.join(' ');
+  };
   form.querySelector('.ex-list').innerHTML = t.items.map((item) => {
     const ex = cat.find((e) => e.id === item.id) || { id: item.id, name: item.id, group: 'Eigene' };
     const target = { ...item, inc: item.inc ?? defaultInc(ex) };
@@ -1422,7 +1542,7 @@ function loadTemplate(form, tplId) {
     const sugg = suggestNext(target, ex, hist, null);
     const decision = sugg.type === 'up' || sugg.type === 'time' ? 'up' : '';
     const sets = prefillSets(target, ex, hist, sugg, decision);
-    let html = exerciseBlock({ ...ex, sets }, hist[0], { target, sugg, decision });
+    let html = exerciseBlock({ ...ex, sets }, hist[0], { target, sugg, decision, note: hintFor(ex) });
     const kg = sets[0]?.kg;
     if (warm < 2 && ex.unit !== 's' && kg >= 10) { warm += 1; html = html.replace('<div class="sets">', `<p class="muted small warm-sets">${esc(warmupSets(kg, target.inc || 2.5))}</p><div class="sets">`); }
     return html;
@@ -1611,10 +1731,21 @@ function weekBars(ctx, list, valueFn, { unit = '', type, color, fmt = (v) => fmt
   }), { unit });
 }
 
-function dailyLine(days, key, label, unit, { fmt = (v) => fmtNum(v), color = 'var(--series-1)', invert = false } = {}) {
+function dailyLine(days, key, label, unit, { fmt = (v) => fmtNum(v), color = 'var(--series-1)', invert = false, band } = {}) {
   const pts = days.filter((d) => typeof d[key] === 'number');
   return line(pts.map((d) => ({ x: ms(d.date), y: d[key], tip: `<b>${esc(fmtDate(d.date))}</b><br>${label}: ${fmt(d[key])} ${unit}` })),
-    { color, xLabels: xLabels(pts.map((d) => d.date)), yFormat: fmt, invert });
+    { color, xLabels: xLabels(pts.map((d) => d.date)), yFormat: fmt, invert, band });
+}
+
+/** Average bed and wake time ('23:40' style); bed times after midnight count as late evening. */
+function sleepTiming(list) {
+  const toMin = (t, bed) => { const [h, m] = t.split(':').map(Number); let v = h * 60 + m; if (bed && v < 12 * 60) v += 24 * 60; return v; };
+  const fmt = (v) => `${String(Math.floor(v / 60) % 24).padStart(2, '0')}:${String(Math.round(v % 60)).padStart(2, '0')}`;
+  const bed = list.filter((d) => d.sleepStart).map((d) => toMin(d.sleepStart, true));
+  const wake = list.filter((d) => d.sleepEnd).map((d) => toMin(d.sleepEnd, false));
+  if (!bed.length) return '';
+  const sd = (arr) => { const m = avg(arr); return Math.sqrt(avg(arr.map((x) => (x - m) ** 2))); };
+  return ` Ø eingeschlafen ${fmt(avg(bed))}, aufgewacht ${wake.length ? fmt(avg(wake)) : '–'}${bed.length >= 5 ? ` · Regelmässigkeit ±${Math.round(sd(bed))} Min.` : ''}.`;
 }
 
 function renderTrends() {
@@ -1634,11 +1765,12 @@ function renderTrends() {
   // a sport gets its own tab as soon as it was recorded once (any time)
   const sportTabs = sportsIn(all);
   const hasHealth = healthDays().length || Object.keys(checkins()).length;
-  const tabs = [['overview', 'Übersicht'], ...(hasHealth ? [['health', '❤️ Gesundheit']] : []), ...sportTabs.map((t) => [t, `${sport(t).emoji} ${SPORT_LABELS[t]}`])];
+  const tabs = [['overview', 'Übersicht'], ...(hasHealth ? [['health', '❤️ Gesundheit']] : []), ...sportTabs.map((t) => [t, `${sport(t).emoji} ${SPORT_LABELS[t]}`]), ...(all.length || garminRecords().length ? [['records', '🏆 Rekorde']] : [])];
   if (!tabs.some(([k]) => k === state.trendTab)) state.trendTab = 'overview';
   const tab = state.trendTab;
   const body = tab === 'overview' ? trendOverview(ctx, sportTabs, hasHealth)
     : tab === 'health' ? trendHealth(ctx)
+      : tab === 'records' ? trendRecords()
       : tab === 'run' ? trendRun(ctx)
         : tab === 'strength' ? trendStrength(ctx)
           : trendSport(ctx, tab);
@@ -1754,7 +1886,7 @@ function trendHealth(ctx) {
     const short = sleepDays.filter((d) => d.sleepH < 7).length;
     sleep = card('Schlaf', daily7 ? 'Stunden pro Nacht' : 'Ø pro Nacht und Woche', `${bars(cols, { unit: 'h', height: 160 })}
       ${daily7 && sleepDays.some((d) => d.deepH != null) ? '<div class="legend"><span><i style="background:var(--sleep-deep)"></i>Tief</span><span><i style="background:var(--sleep-rem)"></i>REM</span><span><i style="background:var(--sleep-light)"></i>Leicht</span></div>' : ''}
-      <p class="muted small" style="margin-top:8px">${short} von ${sleepDays.length} Nächten unter 7 h. Für Sportler gelten 7–9 h als Richtwert.</p>`, 'wide');
+      <p class="muted small" style="margin-top:8px">${short} von ${sleepDays.length} Nächten unter 7 h. Für Sportler gelten 7–9 h als Richtwert.${sleepTiming(sleepDays)}</p>`, 'wide');
   }
 
   const ci = Object.entries(checkins()).filter(([d]) => d >= ctx.from).sort(([a], [b]) => a.localeCompare(b));
@@ -1782,15 +1914,143 @@ function trendHealth(ctx) {
     <section class="grid two">
       ${sleep}
       ${has('restingHr') ? card('Ruhepuls', 'bpm · tiefer = erholter', dailyLine(days, 'restingHr', 'Ruhepuls', 'bpm', { color: 'var(--bad)' })) : ''}
-      ${has('hrv') ? card('HRV (Nacht)', 'ms · höher = erholter', dailyLine(days, 'hrv', 'HRV', 'ms')) : ''}
+      ${has('hrv') ? card('HRV (Nacht)', 'ms · Band = dein Normalbereich laut Garmin', dailyLine(days, 'hrv', 'HRV', 'ms', { band: (() => { const b = [...days].reverse().find((d) => d.hrvBaseLow && d.hrvBaseHigh); return b ? { lo: b.hrvBaseLow, hi: b.hrvBaseHigh } : undefined; })() })) : ''}
       ${has('stress') ? card('Stress', 'Garmin 0–100 · Tagesschnitt', dailyLine(days, 'stress', 'Stress', '', { color: 'var(--warn)' })) : ''}
       ${has('bodyBatteryHigh') ? card('Body Battery', 'Höchstwert pro Tag', dailyLine(days, 'bodyBatteryHigh', 'Body Battery', '', { color: 'var(--good)' })) : ''}
       ${has('weightKg') ? card('Körpergewicht', 'kg · Garmin und Check-in', dailyLine(days, 'weightKg', 'Gewicht', 'kg', { fmt: (v) => fmtNum(v, 1), color: 'var(--accent)' })) : ''}
       ${has('sleepScore') ? card('Schlaf-Score', '0–100', dailyLine(days, 'sleepScore', 'Score', '', { color: 'var(--sleep-rem)' })) : ''}
       ${stepsWeekly}
+      ${intensityCard(ctx, days)}
+      ${EXTRA_HEALTH.filter(([k]) => has(k)).map(([k, title, sub, unit, digits, color]) => card(title, sub, dailyLine(days, k, title, unit, { fmt: (v) => fmtNum(v, digits), color }))).join('')}
       ${ciChart}
       ${fitness}
     </section>`;
+}
+
+const EXTRA_HEALTH = [
+  // key, title, subtitle, unit, digits, colour
+  ['readiness', 'Garmin Readiness', '0–100 · Trainingsbereitschaft am Morgen', '', 0, 'var(--good)'],
+  ['vo2max', 'VO₂max', 'ml/kg/min · Verlauf seit Sync-Beginn', '', 1, 'var(--s-run)'],
+  ['spo2', 'Blutsauerstoff (SpO₂)', '% · Tagesschnitt', '%', 0, 'var(--series-1)'],
+  ['respiration', 'Atemfrequenz', 'Atemzüge pro Minute (wach)', '/min', 1, 'var(--series-1)'],
+  ['sleepStress', 'Stress im Schlaf', 'Garmin 0–100 · tiefer = erholsamer', '', 0, 'var(--warn)'],
+  ['sleepRestingHr', 'Puls im Schlaf', 'bpm', 'bpm', 0, 'var(--bad)'],
+  ['kcalActive', 'Aktive Kalorien', 'kcal pro Tag', 'kcal', 0, 'var(--accent)'],
+  ['floors', 'Stockwerke', 'pro Tag', '', 0, 'var(--s-walk)'],
+  ['bodyFat', 'Körperfett', '% · Waage', '%', 1, 'var(--accent)'],
+  ['muscleKg', 'Muskelmasse', 'kg · Waage', 'kg', 1, 'var(--s-strength)'],
+];
+
+/** Weekly intensity minutes (moderate + 2× vigorous) against the WHO minimum of 150. */
+function intensityCard(ctx, days) {
+  if (!days.some((d) => d.moderateMin != null || d.vigorousMin != null)) return '';
+  return card('Intensitätsminuten', 'pro Woche · WHO-Minimum 150', `${bars(ctx.weekStarts.map((wk) => {
+    const w = days.filter(inWeek(wk));
+    const v = w.reduce((s, d) => s + (d.moderateMin || 0) + 2 * (d.vigorousMin || 0), 0);
+    return { label: weekLabel(wk), tip: `<b>KW ${isoWeek(wk)}</b><br>${v} Intensitätsminuten${v >= 150 ? ' ✓' : ''}`, segments: [{ value: v, color: v >= 150 ? 'var(--good)' : 'var(--warn)' }] };
+  }))}`);
+}
+
+// ── records ──
+const garminRecords = () => state.data?.garmin?.records || [];
+const RECORD_SPORTS = [['run', '🏃 Laufen'], ['swim', '🏊 Schwimmen'], ['cycle', '🚴 Rad'], ['strength', '🏋️ Kraft'], ['steps', '👟 Schritte'], ['other', '✨ Weitere']];
+
+function fmtRecord(r) {
+  const v = r.value;
+  if (v == null) return '–';
+  if (r.kind === 'time') return fmtClock(Math.round(v));
+  if (r.kind === 'distance') return r.sport === 'swim' ? `${fmtNum(v)} m` : `${fmtNum(v / 1000, 2)} km`;
+  if (r.kind === 'power') return `${fmtNum(v)} W`;
+  if (r.kind === 'elevation') return `${fmtNum(v)} m`;
+  if (r.kind === 'pace') return `${fmtPace(v)} ${r.sport === 'swim' ? '/100 m' : '/km'}`;
+  if (r.kind === 'kg') return `${fmtNum(v, 1)} kg`;
+  if (r.kind === 'sec') return `${fmtNum(v)} s`;
+  if (r.kind === 'reps') return `${fmtNum(v)} Wdh.`;
+  return fmtNum(v);
+}
+
+/** Records computed from the athlete's own data (complements Garmin's list). */
+function ownRecords(acts) {
+  const out = [];
+  const best = (list, f, better = 'max') => {
+    const hit = list.reduce((b, a) => { const v = f(a); return v && (!b || (better === 'max' ? v > b.v : v < b.v)) ? { v, a } : b; }, null);
+    if (hit) hit.earlier = list.filter((a) => a.date < hit.a.date && f(a)).length;
+    return hit;
+  };
+  // improved = an earlier activity existed for this metric, so the record really beat something
+  const push = (sport, label, kind, hit, extra = {}) => hit && out.push({ sport, label, kind, value: hit.v, date: hit.a.date, activityId: hit.a.id, own: true, improved: hit.earlier > 0, ...extra });
+  const runs = acts.filter((a) => a.type === 'run' && a.distanceKm);
+  push('run', 'Längster Lauf', 'distance', best(runs, (a) => a.distanceKm * 1000));
+  push('run', 'Schnellste Ø-Pace ab 5 km', 'pace', best(runs.filter((a) => a.distanceKm >= 5 && a.paceSecPerKm), (a) => a.paceSecPerKm, 'min'));
+  push('run', 'Schnellste Ø-Pace ab 10 km', 'pace', best(runs.filter((a) => a.distanceKm >= 10 && a.paceSecPerKm), (a) => a.paceSecPerKm, 'min'));
+  push('run', 'Meiste Höhenmeter in einem Lauf', 'elevation', best(runs, (a) => a.elevationGain));
+  const swims = acts.filter((a) => a.type === 'swim' && a.distanceKm);
+  push('swim', 'Längste Schwimmeinheit', 'distance', best(swims, (a) => a.distanceKm * 1000));
+  push('swim', 'Schnellste Ø-Pace ab 400 m', 'pace', best(swims.filter((a) => a.distanceKm >= 0.4), (a) => a.paceSecPer100m || (a.durationMin * 60) / (a.distanceKm * 10), 'min'));
+  push('swim', 'Bester SWOLF', 'value', best(swims.filter((a) => a.swolf), (a) => a.swolf, 'min'));
+  const rides = acts.filter((a) => a.type === 'cycle' && a.distanceKm);
+  push('cycle', 'Längste Radfahrt', 'distance', best(rides, (a) => a.distanceKm * 1000));
+  // strength: best estimated 1RM (or reps / seconds) per exercise
+  const per = new Map();
+  for (const a of [...acts].reverse()) { // oldest first, so 'improved' means it beat an earlier session
+    if (a.eval) continue;
+    for (const e of a.exercises || []) {
+      const b = bestE1rm(e);
+      const v = b ?? Math.max(0, ...e.sets.map((x) => x.reps || 0));
+      if (!v) continue;
+      const cur = per.get(e.id);
+      const seen = (cur?.seen || 0) + 1;
+      if (!cur || v > cur.value) per.set(e.id, { sport: 'strength', label: e.name, kind: b ? 'kg' : e.unit === 's' ? 'sec' : 'reps', value: v, date: a.date, activityId: a.id, own: true, detail: b ? `≈ 1RM aus ${fmtSets(e.sets, e.unit)}` : `${fmtSets(e.sets, e.unit)}`, unit: e.unit, improved: !!cur, seen });
+      else cur.seen = seen;
+    }
+  }
+  out.push(...[...per.values()].sort((x, y) => x.label.localeCompare(y.label)));
+  return out;
+}
+
+function recentRecords(days = 7) {
+  const since = addDays(todayISO(), -days);
+  const g = garminRecords().filter((r) => r.date >= since);
+  // strength PRs: a session that beat all earlier sessions of that exercise
+  const acts = activities();
+  const own = [];
+  for (const a of acts.filter((x) => x.date >= since && x.exercises?.length && !x.eval)) {
+    const earlier = acts.filter((x) => (x.start || x.date) < (a.start || a.date));
+    for (const e of a.exercises) {
+      const b = bestE1rm(e);
+      const prev = earlier.flatMap((x) => (x.exercises || []).filter((y) => y.id === e.id)).map(bestE1rm).filter(Boolean);
+      if (b && prev.length && b > Math.max(...prev)) own.push({ label: e.name, kind: 'kg', value: b, date: a.date, sport: 'strength' });
+    }
+  }
+  return [...g, ...own];
+}
+
+function recordsBanner() {
+  const recs = recentRecords(7);
+  if (!recs.length) return '';
+  return `<article class="card records-banner"><span class="trophy">🏆</span><div><p class="eyebrow">Neue Rekorde diese Woche</p>
+    <p>${recs.slice(0, 4).map((r) => `<strong>${esc(r.label)}</strong> ${esc(fmtRecord(r))}`).join(' · ')}</p></div>
+    <a class="link" href="#/trends" data-action="trend-tab" data-tab="records">Alle ${icon('chevron', 14)}</a></article>`;
+}
+
+function trendRecords() {
+  const g = garminRecords();
+  const own = ownRecords(activities());
+  const ids = new Set(activities().map((a) => a.id));
+  const since = addDays(todayISO(), -14);
+  const row = (r) => `<li>
+    <div><span>${esc(r.label)}</span>${r.detail ? `<span class="muted small">${esc(r.detail)}</span>` : ''}</div>
+    <strong>${esc(fmtRecord(r))}</strong>
+    <span class="muted small">${r.date ? esc(fmtDate(r.date, { day: 'numeric', month: 'short', year: '2-digit' })) : ''}${r.date >= since && (!r.own || r.improved) ? ' <span class="chip good">neu</span>' : ''}</span>
+    ${r.activityId && ids.has(r.activityId) ? `<button class="icon-btn sm" data-action="open-activity" data-id="${esc(r.activityId)}" aria-label="Aktivität öffnen">${icon('chevron', 16)}</button>` : '<span></span>'}
+  </li>`;
+  const section = (title, list, sub) => (list.length ? card(title, sub, RECORD_SPORTS.filter(([k]) => list.some((r) => r.sport === k)).map(([k, l]) => `<h3 class="sub">${l}</h3><ul class="records rec-list">${list.filter((r) => r.sport === k).map(row).join('')}</ul>`).join('')) : '');
+  if (!g.length && !own.length) return emptyState('Noch keine Rekorde', 'Sobald Trainings erfasst sind oder Garmin Rekorde meldet, erscheinen sie hier.');
+  return `<section class="grid two">
+    ${section('Garmin-Rekorde', g, 'offiziell von Garmin Connect')}
+    ${section('Aus deinen Daten', own, 'alle erfassten Trainings')}
+  </section>
+  ${g.length ? '' : '<p class="muted small">Garmin-Rekorde (z.B. schnellste 5 km, 100 m Schwimmen) erscheinen nach dem nächsten Sync.</p>'}`;
 }
 
 // ── running ──
@@ -1823,6 +2083,7 @@ function trendRun(ctx) {
       ${card('Kilometer pro Woche', '', weekBars(ctx, runs, (w) => sum(w, (a) => a.distanceKm), { unit: 'km', type: 'run' }))}
       ${card('Pace', 'Ø 5 Läufe · höher = schneller', paceChart)}
       ${eff ? card('Laufökonomie', 'Meter pro Herzschlag · höher = fitter', eff) : ''}
+      ${runDynamics(paced)}
       ${longCols}
       ${own ? card(`Prognose ${esc(RACE_DISTANCES[race?.distanceKm || HM_KM] || 'Halbmarathon')}`, 'aus deinen Läufen der letzten 8 Wochen', `<dl class="stat-grid">
           <div><dt>Prognose</dt><dd>${fmtClock(Math.round(own.sec))}</dd></div>
@@ -1836,6 +2097,21 @@ function trendRun(ctx) {
         </dl>`) : ''}
       ${loadCard(ctx, runs, 'Laufbelastung pro Woche')}
     </section>`;
+}
+
+/** Running dynamics per run: cadence, stride, ground contact (only if the watch records them). */
+function runDynamics(runs) {
+  const series = [
+    ['cadence', 'Kadenz', 'Schritte/min', 0, 'var(--s-run)'],
+    ['strideCm', 'Schrittlänge', 'cm', 0, 'var(--series-1)'],
+    ['groundContactMs', 'Bodenkontaktzeit', 'ms · tiefer = effizienter', 0, 'var(--warn)'],
+    ['avgPower', 'Laufleistung', 'Watt', 0, 'var(--accent)'],
+  ].filter(([k]) => runs.filter((r) => r[k]).length >= 2);
+  return series.map(([k, title, sub, digits, color]) => {
+    const pts = runs.filter((r) => r[k]);
+    return card(title, sub, line(pts.map((r) => ({ x: ms(r.date), y: r[k], tip: `<b>${esc(actTitle(r))}</b><br>${esc(fmtDate(r.date))}<br>${title}: ${fmtNum(r[k], digits)}` })),
+      { color, xLabels: xLabels(pts.map((r) => r.date)), yFormat: (v) => fmtNum(v, digits) }));
+  }).join('');
 }
 
 // ── strength ──
@@ -1893,6 +2169,19 @@ function trendStrength(ctx) {
     </section>`;
 }
 
+function swimTechnique(list) {
+  const s = [...list].reverse();
+  return [['swolf', 'SWOLF', 'Zeit + Züge pro Bahn · tiefer = effizienter', 'var(--s-swim)'],
+    ['avgStrokesPerLength', 'Züge pro Bahn', 'tiefer = längerer Zug', 'var(--series-1)'],
+    ['strokeRate', 'Zugrate', 'Züge pro Minute', 'var(--accent)']]
+    .filter(([k]) => s.filter((a) => a[k]).length >= 2)
+    .map(([k, title, sub, color]) => {
+      const pts = s.filter((a) => a[k]);
+      return card(title, sub, line(pts.map((a) => ({ x: ms(a.date), y: a[k], tip: `<b>${esc(fmtDate(a.date))}</b><br>${title}: ${fmtNum(a[k], 1)}${a.poolLengthM ? ` · ${fmtNum(a.poolLengthM)} m Becken` : ''}` })),
+        { color, xLabels: xLabels(pts.map((a) => a.date)), yFormat: (v) => fmtNum(v, 0) }));
+    }).join('');
+}
+
 // ── every other sport (swim, cycle, mobility, …) ──
 function trendSport(ctx, t) {
   const list = ctx.acts.filter((a) => a.type === t);
@@ -1904,7 +2193,7 @@ function trendSport(ctx, t) {
   const withDist = list.filter((a) => a.distanceKm > 0 && a.durationMin).reverse();
   let speed = '';
   if (withDist.length >= 2 && t === 'swim') {
-    const per100 = (a) => (a.durationMin * 60) / (a.distanceKm * 10);
+    const per100 = (a) => a.paceSecPer100m || (a.durationMin * 60) / (a.distanceKm * 10);
     speed = card('Tempo', 'pro 100 m · höher = schneller', line(withDist.map((a) => ({ x: ms(a.date), y: per100(a), tip: `<b>${esc(fmtDate(a.date))}</b><br>${fmtNum(a.distanceKm * 1000)} m · ${fmtPace(per100(a))} /100 m` })),
       { invert: true, yFormat: fmtPace, steps: [5, 10, 15, 30], color: sportColor(t), xLabels: xLabels(withDist.map((a) => a.date)), area: false }));
   } else if (withDist.length >= 2) {
@@ -1925,6 +2214,7 @@ function trendSport(ctx, t) {
         : card('Minuten pro Woche', '', weekBars(ctx, list, (w) => sum(w, (a) => a.durationMin), { unit: 'min', type: t, fmt: (v) => fmtNum(v) }))}
       ${card('Einheiten pro Woche', '', weekBars(ctx, list, (w) => w.length, { unit: '', type: t, fmt: (v) => fmtNum(v) }))}
       ${speed}
+      ${t === 'swim' ? swimTechnique(list) : ''}
       ${loadCard(ctx, list, `Belastung ${esc(label)}`)}
     </section>`;
 }
@@ -2325,6 +2615,7 @@ function renderStatus() {
 function navigate() {
   const route = location.hash.replace(/^#\/?/, '') || 'heute';
   const changed = route !== state.route;
+  if (changed && sheet.open) sheet.close();
   state.route = ROUTES[route] ? route : 'heute';
   render(changed);
   if (changed) scrollTo({ top: 0 });
@@ -2393,6 +2684,21 @@ const actions = {
     block.querySelector('.sets').innerHTML = JSON.parse(el.dataset.sets).map((s) => setRow(s, block.dataset.exUnit)).join('');
   },
   'tpl-start': (el) => openForm(null, { templateId: el.dataset.id }),
+  'garmin-sets-take': async (el) => {
+    const a = activities().find((x) => x.id === el.dataset.id);
+    if (!a?.garminSets) return;
+    const exercises = garminSetsToExercises(a.garminSets);
+    const ann = state.data.manual?.annotations?.[a.id] || {};
+    try {
+      await store.saveAnnotation(a.id, { ...ann, exercises });
+      const cat = catalog(profile());
+      const unknown = exercises.filter((e) => !cat.some((c) => c.id === e.id)).map(({ sets, ...e }) => e);
+      if (unknown.length) await store.updateProfile((raw) => { const p = normalizeProfile(raw); p.customExercises = [...p.customExercises, ...unknown.filter((u) => !p.customExercises.some((c) => c.id === u.id))]; return p; });
+      toast(`${exercises.length} Übungen übernommen`);
+      await reload();
+      openActivity(a.id);
+    } catch (err) { toast(`Speichern fehlgeschlagen: ${err.message}`, 'error'); }
+  },
   'gym-toggle': (el) => {
     const form = el.closest('form');
     const on = !form.classList.contains('gym-on');
