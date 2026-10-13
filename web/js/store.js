@@ -164,6 +164,14 @@ export function deleteActivity(id) {
   }, `Training gelöscht (${id})`);
 }
 
+export function saveCheckin(day, checkin) {
+  return write('manual', (m) => {
+    m.checkins ??= {};
+    if (checkin) m.checkins[day] = checkin; else delete m.checkins[day];
+    return m;
+  }, `Check-in ${day}`);
+}
+
 export function saveAnnotation(id, annotation) {
   return write('manual', (m) => {
     m.annotations ??= {};

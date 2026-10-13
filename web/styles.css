@@ -37,6 +37,9 @@
   --s-swim:     light-dark(#e34948, #e66767);
   --s-other:    light-dark(#8d918a, #757b73);
   --series-1:   light-dark(#2a78d6, #3987e5);
+  --sleep-deep:  light-dark(#3b3f9e, #7a7ff0);
+  --sleep-rem:   light-dark(#8a63d2, #b28cf2);
+  --sleep-light: light-dark(#a9b8e8, #4b5a8c);
 
   --radius: 20px;
   --shadow: light-dark(0 1px 2px rgb(16 24 16 / .04), 0 1px 2px rgb(0 0 0 / .3));
@@ -613,3 +616,83 @@ details.warmup label { display: flex; gap: 10px; align-items: flex-start; font-s
   .tpl-row, .tpl-row.timed { grid-template-columns: repeat(4, minmax(0, 1fr)) 36px; }
   .tpl-row > .field.grow { grid-column: 1 / -1; }
 }
+
+/* ───────── Etappe 2: check-in, weekly goals, supervisor, gym mode, trends ───────── */
+.checkin { display: flex; flex-direction: column; gap: 12px; border-top: 4px solid var(--accent); }
+.checkin.done { flex-direction: row; align-items: center; justify-content: space-between; flex-wrap: wrap; border-top-color: var(--good); }
+.checkin.done.low { border-top-color: var(--bad); }
+.ci-summary { display: flex; align-items: center; gap: 14px; }
+.ci-score { flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font: 700 18px var(--mono); color: var(--c); background: color-mix(in oklab, var(--c) 14%, var(--surface)); }
+.ci-pain { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-weight: 600; }
+.ci-pain.p-gelb { color: var(--warn); }
+.ci-pain.p-rot { color: var(--bad); }
+.warn-text { color: var(--warn); font-weight: 600; }
+.ci-scales { display: grid; gap: 10px; }
+.ci-row { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 4px 10px; align-items: center; }
+.ci-label { font-weight: 600; font-size: 14px; }
+.ci-hint { grid-column: 2; font-size: 11.5px; }
+.ci-btns { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.ci-btns button { height: 42px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); font: 600 15px var(--mono); color: var(--ink-2); cursor: pointer; transition: all .15s; }
+.ci-btns button:hover { background: var(--hover); }
+.ci-btns button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.ci-extra { display: flex; gap: 10px; flex-wrap: wrap; }
+.ci-extra .field { flex: 1 1 120px; }
+.ci-extra .field.grow { flex: 3 1 180px; }
+
+.weekly .week-rings { display: flex; flex-wrap: wrap; gap: 14px 18px; }
+.week-ring { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.week-ring .ring-inner { width: calc(100% - 14px); }
+.week-ring .ring-inner strong { font-size: 17px; }
+.week-ring .ring-inner span { display: none; }
+.week-ring.reached span { color: var(--good); }
+.empty-weekly { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.empty-weekly p { display: flex; gap: 8px; align-items: center; }
+.weekly-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.weekly-inputs legend { grid-column: 1 / -1; margin-bottom: 4px; }
+.weekly-inputs legend em { font-style: normal; font-weight: 500; }
+
+details.supervisor { margin-bottom: 12px; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); font-size: 13.5px; }
+details.supervisor summary { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; list-style: none; }
+details.supervisor summary::-webkit-details-marker { display: none; }
+details.supervisor summary .muted { margin-left: auto; }
+details.supervisor.good summary { color: var(--good); }
+details.supervisor.warn summary { color: var(--warn); }
+details.supervisor ul { margin: 8px 0 2px 18px; display: grid; gap: 6px; }
+
+/* gym mode: one step per screen */
+.gym-toggle { align-self: flex-start; }
+#act-form.gym-on > :not(.sheet-head, .gym-bar, .strength-fields, .gym-end) { display: none !important; }
+#act-form.gym-on:not([data-gym-stage=end]) .gym-end { display: none !important; }
+#act-form#act-form.gym-on[data-gym-stage=end] .strength-fields { display: none !important; }
+#act-form.gym-on .strength-fields > :not(.ex-list, .warmup) { display: none !important; }
+#act-form.gym-on[data-gym-stage=ex] .warmup, #act-form.gym-on[data-gym-stage=warm] .ex-list { display: none !important; }
+#act-form.gym-on .ex-block:not(.gym-cur) { display: none !important; }
+#act-form.gym-on .ex-block { border: 0; padding: 0; background: none; }
+#act-form.gym-on .ex-block header strong { font-size: 20px; }
+#act-form.gym-on .set-row input { min-height: 52px; font-size: 20px; }
+#act-form.gym-on .strength-fields { min-height: 46vh; }
+.gym-bar { position: sticky; top: 0; z-index: 3; display: grid; gap: 8px; padding: 10px 0; background: var(--surface); border-bottom: 1px solid var(--border); }
+.gym-progress { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.gym-progress i { display: block; height: 100%; background: var(--accent); transition: width .3s var(--ease); }
+.gym-nav { display: flex; align-items: center; gap: 8px; }
+.gym-nav strong { flex: 1; font-size: 15px; }
+.gym-rest { font: 700 16px var(--mono); color: var(--accent-text); }
+.gym-dots { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gym-dots button:not(.link) { width: 10px; height: 10px; padding: 0; border-radius: 50%; border: 0; background: var(--border); cursor: pointer; }
+.gym-dots button.past { background: color-mix(in oklab, var(--accent) 45%, var(--surface-2)); }
+.gym-dots button.on { background: var(--accent); width: 22px; border-radius: 99px; }
+.gym-dots .link { margin-left: auto; background: none; border: 0; cursor: pointer; }
+
+/* trends */
+.trend-tabs { margin: 4px 0 16px; }
+.trend-stats { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); }
+.tile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.sport-tile { display: flex; flex-direction: column; gap: 8px; text-align: left; font: inherit; color: inherit; cursor: pointer; border-top: 4px solid var(--c); transition: translate .15s var(--ease), box-shadow .15s; }
+.sport-tile:hover { translate: 0 -2px; box-shadow: var(--shadow-lg); }
+.tile-head { font-weight: 700; font-size: 15px; }
+.tile-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--ink-3); }
+.tile-stats strong { font: 650 16px var(--mono); color: var(--ink); }
+.records { list-style: none; padding: 0; display: grid; gap: 6px; }
+.records li { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.4fr) auto auto; gap: 10px; align-items: center; padding: 8px 12px; border-radius: 12px; background: var(--surface-2); font-size: 14px; }
+.records strong { font: 600 14px var(--mono); }
+@media (max-width: 640px) { .records li { grid-template-columns: minmax(0, 1fr) auto; } .records li > .muted:nth-child(2) { grid-column: 1 / -1; order: 3; } }
