@@ -842,3 +842,14 @@ button.check[aria-pressed="true"] { background: var(--good); border-color: var(-
 .records-banner { display: flex; align-items: center; gap: 14px; border-top: 4px solid #e8b21b; }
 .records-banner > div { flex: 1; min-width: 0; }
 .records-banner .trophy { font-size: 30px; }
+
+/* Garmin Readiness */
+.readiness-card { display: flex; flex-direction: column; gap: 12px; }
+.rd-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.rd-head > div:last-child { flex: 1 1 220px; }
+.rd-head .ring-inner strong { font-size: 26px; }
+.rd-factors { display: grid; gap: 8px; }
+.rd-f { display: grid; grid-template-columns: 140px minmax(0, 1fr) 90px; gap: 10px; align-items: center; font-size: 13.5px; }
+.rd-bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.rd-bar i { display: block; height: 100%; border-radius: 99px; background: var(--good); }
+@media (max-width: 520px) { .rd-f { grid-template-columns: 110px minmax(0, 1fr) 70px; font-size: 12.5px; } }

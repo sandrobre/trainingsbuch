@@ -298,25 +298,52 @@ def daily_metrics(api: Garmin, day: str) -> dict:
         hrvBaseLow=baseline.get("balancedLow"),
         hrvBaseHigh=baseline.get("balancedUpper"),
     )
-    readiness = safe(f"Readiness {day}", api.get_training_readiness, day)
-    if isinstance(readiness, list) and readiness:
-        entry["readiness"] = readiness[0].get("score")
+    morning, _ = readiness_entries(api, day)
+    if morning and morning.get("score") is not None:
+        entry["readiness"] = morning.get("score")
     return {k: v for k, v in entry.items() if v is not None}
+
+
+def readiness_entries(api: Garmin, day: str) -> tuple[dict | None, dict | None]:
+    """(morning value, latest value) of Training Readiness for a day.
+    Garmin returns a list of snapshots over the day – or, depending on watch/firmware, a single dict."""
+    data = safe(f"Readiness {day}", api.get_training_readiness, day)
+    if isinstance(data, dict):
+        data = [data]
+    entries = [e for e in data or [] if isinstance(e, dict) and e.get("score") is not None]
+    if not entries:
+        return None, None
+    stamp = lambda e: str(e.get("timestampLocal") or e.get("timestamp") or "")
+    ordered = sorted(entries, key=stamp)
+    morning = next((e for e in entries if e.get("inputContext") == "AFTER_WAKEUP_RESET"), ordered[0])
+    return morning, ordered[-1]
 
 
 def snapshot(api: Garmin) -> dict:
     today = iso_today()
     snap: dict[str, Any] = {}
 
-    readiness = safe("Training Readiness", api.get_training_readiness, today)
-    if isinstance(readiness, list) and readiness:
-        r = readiness[0]
-        snap["readiness"] = {
+    morning, r = readiness_entries(api, today)
+    if r and r.get("score") is not None:
+        snap["readiness"] = {k: v for k, v in {
             "score": r.get("score"),
             "level": r.get("level"),
             "feedback": r.get("feedbackShort"),
+            "feedbackLong": r.get("feedbackLong"),
             "recoveryTimeH": num((r.get("recoveryTime") or 0) / 60, 0),
-        }
+            "morningScore": (morning or {}).get("score"),
+            "at": r.get("timestampLocal") or r.get("timestamp"),
+            # how much each factor currently supports readiness (0–100 %) + Garmin's verdict per factor
+            "factors": {key: {"pct": r.get(f"{field}FactorPercent"), "feedback": r.get(f"{field}FactorFeedback")}
+                        for key, field in (("sleep", "sleepScore"), ("recovery", "recoveryTime"), ("hrv", "hrv"),
+                                           ("load", "acwr"), ("sleepHistory", "sleepHistory"), ("stressHistory", "stressHistory"))
+                        if r.get(f"{field}FactorPercent") is not None or r.get(f"{field}FactorFeedback")},
+            "sleepScore": r.get("sleepScore"),
+            "hrvWeeklyAverage": r.get("hrvWeeklyAverage"),
+            "acuteLoad": r.get("acuteLoad"),
+        }.items() if v not in (None, "", {})}
+    else:
+        log.info("Keine Training Readiness von Garmin (Uhr unterstützt sie evtl. nicht)")
 
     status = safe("Training Status", api.get_training_status, today) or {}
     latest = ((status.get("mostRecentTrainingStatus") or {}).get("latestTrainingStatusData")) or {}
@@ -413,17 +440,34 @@ def _pr_meta(key: str, type_id: Any, activity_type: str) -> tuple[str, str, str]
         return sport, f"Schnellste {dist}".strip() if dist else "Schnellste Zeit", "time"
     if type_id in PR_LABELS:
         return PR_LABELS[type_id]
-    return sport, key or f"Rekord {type_id}", "value"
+    names = {"run": "Laufen", "swim": "Schwimmen", "cycle": "Rad", "steps": "Schritte"}
+    return sport, f"{names.get(sport, 'Garmin')}-Rekord (Typ {type_id})" if not key else key, "value"
+
+
+def pr_types(api: Garmin) -> dict[int, dict]:
+    """Garmin's own list of record types (id → label key, sport) – names the records that only carry a typeId."""
+    name = getattr(api, "display_name", None)
+    data = safe("Rekordtypen", api.connectapi, f"/personalrecord-service/personalrecordtype/prtypes/{name}") if name else None
+    out = {}
+    for t in data if isinstance(data, list) else []:
+        if isinstance(t, dict) and t.get("id") is not None:
+            out[t["id"]] = {"key": t.get("key") or t.get("prTypeLabelKey") or "", "sport": (t.get("sport") or "").lower()}
+    log.info("%s Rekordtypen von Garmin", len(out))
+    return out
 
 
 def personal_records(api: Garmin) -> list[dict]:
     data = safe("Persönliche Rekorde", api.get_personal_record) or []
+    types = pr_types(api) if data else {}
     out = []
     for r in data if isinstance(data, list) else []:
-        sport, label, kind = _pr_meta(r.get("prTypeLabelKey") or "", r.get("typeId"), ((r.get("activityType") or "") if isinstance(r.get("activityType"), str) else ""))
+        t = types.get(r.get("typeId"), {})
+        act_type = r.get("activityType")
+        act_type = (act_type.get("typeKey") if isinstance(act_type, dict) else act_type) or t.get("sport") or ""
+        sport, label, kind = _pr_meta(r.get("prTypeLabelKey") or t.get("key") or "", r.get("typeId"), str(act_type).lower())
         date_str = (r.get("prStartTimeLocalFormatted") or r.get("prStartTimeGmtFormatted") or r.get("actStartDateTimeInGMTFormatted") or "")[:10]
         out.append({k: v for k, v in {
-            "typeId": r.get("typeId"), "key": r.get("prTypeLabelKey"), "sport": sport, "label": label, "kind": kind,
+            "typeId": r.get("typeId"), "key": r.get("prTypeLabelKey") or t.get("key"), "sport": sport, "label": label, "kind": kind,
             "value": r.get("value"), "date": date_str or None,
             "activityId": f"g{r['activityId']}" if r.get("activityId") else None, "activityName": r.get("activityName"),
         }.items() if v not in (None, "")})
