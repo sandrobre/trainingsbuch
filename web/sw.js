@@ -1,6 +1,6 @@
 // Offline shell: cache the app files, always go to the network for data (GitHub API is cross-origin and not intercepted).
-const VERSION = 'tb-v5';
-const SHELL = ['./', 'index.html', 'styles.css', 'js/app.js', 'js/util.js', 'js/store.js', 'js/charts.js', 'js/demo.js', 'js/training.js', 'js/planning.js', 'icon.svg', 'manifest.webmanifest'];
+const VERSION = 'tb-v6';
+const SHELL = ['./', 'index.html', 'styles.css', 'js/app.js', 'js/util.js', 'js/store.js', 'js/charts.js', 'js/demo.js', 'js/training.js', 'js/planning.js', 'js/readiness.js', 'icon.svg', 'manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
   // cache: 'reload' – never fill the offline cache from a stale HTTP cache

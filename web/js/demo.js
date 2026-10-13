@@ -106,7 +106,7 @@ export function demoData() {
       });
     }
 
-    if (back > 0 && back < 21) {
+    if (back > 0 && back < 60) {
       const lvl = (v) => Math.max(1, Math.min(5, Math.round(jitter(v, 1))));
       checkins[date] = { energy: lvl(3.8), sleep: lvl(3.6), muscle: lvl(dow === 6 ? 2.6 : 3.7), stress: lvl(3.4), ...(back === 4 ? { pain: 3, painWhere: 'Achillessehne rechts' } : {}) };
     }
