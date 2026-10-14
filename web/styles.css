@@ -891,3 +891,4 @@ button.check[aria-pressed="true"] { background: var(--good); border-color: var(-
 .ready-compact .rc-text .eyebrow { margin: 0; }
 .ready-compact .icon { color: var(--ink-3); rotate: 90deg; }
 .app-ready .rd-head, .readiness-card .rd-head { padding-right: 36px; }
+.quote-card .q-attr { font-style: normal; opacity: .75; font-size: 11.5px; }
