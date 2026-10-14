@@ -2805,6 +2805,9 @@ function applyTheme() {
   const { theme } = store.getPrefs();
   if (theme === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
+  // iPhone status bar follows the active theme
+  const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name=theme-color]').forEach((m) => m.setAttribute('content', dark ? '#0d0f14' : '#f6f7f9'));
 }
 
 function buildNav() {
