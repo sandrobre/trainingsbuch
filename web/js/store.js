@@ -26,7 +26,7 @@ const writeLocal = (key, value) => {
 export const getConfig = () => readLocal(CFG_KEY, {});
 export const saveConfig = (cfg) => writeLocal(CFG_KEY, cfg);
 export const isLive = () => { const c = getConfig(); return Boolean(c.owner && c.dataRepo); };
-export const getPrefs = () => ({ analyzeAfterEntry: false, theme: 'system', ...readLocal(PREFS_KEY, {}) });
+export const getPrefs = () => ({ analyzeAfterEntry: false, theme: 'dark', ...readLocal(PREFS_KEY, {}) });
 export const savePrefs = (p) => writeLocal(PREFS_KEY, { ...getPrefs(), ...p });
 export const cached = () => readLocal(CACHE_KEY, null);
 

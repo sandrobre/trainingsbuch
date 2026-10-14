@@ -7,20 +7,23 @@
   --font: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
-  --bg:        light-dark(#fbf6f2, #0f0c0f);
-  --surface:   light-dark(#ffffff, #15181c);
-  --surface-2: light-dark(#eff1eb, #1d2126);
-  --border:    light-dark(#e2e5dc, #272c33);
-  --grid:      light-dark(#e6e8e1, #23282e);
-  --hover:     light-dark(#f1f3ed, #1b1f24);
-  --ink:       light-dark(#111311, #eef0ec);
-  --ink-2:     light-dark(#4a4f49, #b3b9b1);
-  --ink-3:     light-dark(#81877f, #7c847b);
+  /* Design «Karamell»: dark graphite by default, clean neutral light mode */
+  --bg:        light-dark(#f6f7f9, #0d0f14);
+  --surface:   light-dark(#ffffff, #161922);
+  --surface-2: light-dark(#eef0f3, #1d212b);
+  --border:    light-dark(#e3e6eb, #262b37);
+  --grid:      light-dark(#e6e8ec, #232835);
+  --hover:     light-dark(#f1f3f6, #1b1f28);
+  --ink:       light-dark(#11131a, #eef0f6);
+  --ink-2:     light-dark(#4a4f5c, #b4bacb);
+  --ink-3:     light-dark(#7d8392, #8a91a3);
 
-  --accent:      light-dark(#d9481f, #ff7a52);
-  --accent-text: light-dark(#b73a14, #ff936f);
-  --accent-soft: light-dark(#fde6dc, #3a2017);
-  --on-accent:   light-dark(#ffffff, #1b0f12);
+  --accent:      light-dark(#a86a35, #d6a26c);
+  --accent-text: light-dark(#8a5427, #e6bb8c);
+  --accent-soft: light-dark(#f4e9dd, #2e2318);
+  --on-accent:   light-dark(#ffffff, #1a120b);
+  --quote-from:  light-dark(#b27a46, #9a6334);
+  --quote-to:    light-dark(#6e4322, #3d2614);
 
   --good: light-dark(#1a7f37, #5fd068);
   --warn: light-dark(#a35a00, #f0a33a);
@@ -47,6 +50,7 @@
   --ease: cubic-bezier(.2, .8, .2, 1);
 }
 :root[data-theme="light"] { color-scheme: light; }
+/* default = dark; 'system' follows the phone */
 :root[data-theme="dark"]  { color-scheme: dark; }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -709,8 +713,8 @@ details.supervisor ul { margin: 8px 0 2px 18px; display: grid; gap: 6px; }
 .tl-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .tl-head > div { flex: 1; min-width: 120px; }
 .tl-head h2 { color: var(--tl); font-size: 22px; }
-.tl-lamp { display: inline-flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 12px; background: var(--ink); }
-.tl-lamp i { width: 14px; height: 14px; border-radius: 50%; background: color-mix(in oklab, var(--surface) 25%, transparent); }
+.tl-lamp { display: inline-flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 12px; background: #14161c; box-shadow: inset 0 0 0 1px rgb(255 255 255 / .08); }
+.tl-lamp i { width: 14px; height: 14px; border-radius: 50%; background: #2a2e38; }
 .tl-red .tl-lamp i:nth-child(1) { background: #ff4d42; box-shadow: 0 0 10px #ff4d42; }
 .tl-yellow .tl-lamp i:nth-child(2) { background: #ffbf2e; box-shadow: 0 0 10px #ffbf2e; }
 .tl-green .tl-lamp i:nth-child(3) { background: #3ad06a; box-shadow: 0 0 10px #3ad06a; }
@@ -865,3 +869,25 @@ button.check[aria-pressed="true"] { background: var(--good); border-color: var(-
 .rd-how p, .rd-how ul { margin-top: 8px; color: var(--ink-2); }
 .rd-how ul { padding-left: 18px; display: grid; gap: 4px; }
 @media (max-width: 520px) { .app-ready .rd-f { grid-template-columns: 130px minmax(0, 1fr) 30px; } }
+
+/* Tageszitat */
+.quote-card { position: relative; border-radius: 22px; padding: 20px 18px 14px; color: #fff; background: linear-gradient(135deg, var(--quote-from), var(--quote-to)); box-shadow: 0 8px 22px rgb(80 50 25 / .3); overflow: hidden; }
+.quote-card .q-mark { position: absolute; top: -14px; left: 12px; font: 700 80px/1 Georgia, serif; opacity: .22; pointer-events: none; }
+.quote-card .q-ctx { font: 700 11px var(--font); letter-spacing: .06em; text-transform: uppercase; opacity: .9; margin: 0; padding-right: 34px; }
+.quote-card blockquote { margin: 8px 0 12px; font: 600 19px/1.38 Georgia, 'Times New Roman', serif; }
+.quote-card .q-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; opacity: .95; }
+.quote-card .q-next { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 99px; padding: 5px 11px; background: rgb(255 255 255 / .2); color: #fff; font: 600 12.5px var(--font); cursor: pointer; }
+.quote-card .q-next:hover, .quote-card .q-close:hover { background: rgb(255 255 255 / .32); }
+.quote-card .q-close { position: absolute; z-index: 2; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 50%; border: 0; display: grid; place-items: center; background: rgb(255 255 255 / .16); color: #fff; cursor: pointer; }
+@media (min-width: 960px) { .quote-card blockquote { font-size: 21px; } }
+
+/* Readiness einklappbar */
+.app-ready, .readiness-card { position: relative; }
+.rd-toggle { position: absolute; top: 12px; right: 12px; }
+.rd-toggle .icon { rotate: -90deg; }
+.ready-compact { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 12px 16px; }
+.ready-compact .rc-num { flex: none; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font: 750 20px var(--mono); color: var(--c); border: 4px solid var(--c); }
+.ready-compact .rc-text { flex: 1; display: flex; flex-direction: column; }
+.ready-compact .rc-text .eyebrow { margin: 0; }
+.ready-compact .icon { color: var(--ink-3); rotate: 90deg; }
+.app-ready .rd-head, .readiness-card .rd-head { padding-right: 36px; }

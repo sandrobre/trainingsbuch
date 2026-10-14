@@ -19,6 +19,7 @@ import {
 import {
   READINESS_FACTORS, DEFAULT_WEIGHTS, READINESS_LEVEL, computeReadiness, readinessSeries, calibrate, READINESS_SOURCES,
 } from './readiness.js';
+import { pickQuote, parseOwnQuotes } from './quotes.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const view = $('#view');
@@ -286,6 +287,7 @@ function renderToday() {
     ${pageHead(`${greet}${name ? `, ${esc(name)}` : ''}`, esc(fmtDate(todayISO(), { weekday: 'long', day: 'numeric', month: 'long' })),
       `<button class="btn" data-action="sync">${icon('refresh', 16)}<span>Sync</span></button><button class="btn btn-primary hide-mobile" data-action="add">${icon('plus', 16)}<span>Training</span></button>`)}
     ${demoBanner()}${pendingBanner()}${draftBanner()}
+    ${quoteCard(acts)}
     ${checkinCard()}
     ${todayCard(acts)}
     ${appReadinessCard(acts)}
@@ -520,6 +522,58 @@ function coachToday() {
   return `<p class="coach-word">${icon('sparkles', 14)}<span><strong>Coach (${esc(relTime(ins.generatedAt))}):</strong> ${esc(an.readiness.label || '')}${an.readiness.score != null ? ` · ${an.readiness.score}/100` : ''}. Seine Einschätzung hat Vorrang.</span></p>`;
 }
 
+// ── daily quote ──
+function quoteSituation(acts) {
+  const today = todayISO();
+  const L = light();
+  const items = planRange(today, today).filter((it) => !planDone(it, acts));
+  const t = items.map((it) => `${it.title || ''} ${it.note || ''}`).join(' ');
+  const ph = racePhase(profile().race);
+  if (L.generalLevel === 'red') return 'rest';
+  if (ph && ph.days >= 0 && ph.days <= 7) return 'race';
+  if (items.some((it) => it.race || it.sport === 'hiit') || /intervall|interval|tempo|schwelle|sprint|lang|long|hügel|berg/i.test(t)) return 'hard';
+  if (items.some((it) => it.sport === 'strength')) return 'strength';
+  if (items.some((it) => it.sport === 'swim')) return 'swim';
+  const weekly = profile().weekly || {};
+  if (Object.values(weekly).some((n) => n > 0)) {
+    const streak = weeklyGoalStreak(acts, weekly);
+    if (streak.current >= 2) return 'consistency';
+    const last = addDays(weekStart(today), -7);
+    const missed = Object.entries(weekly).some(([k, n]) => n > 0 && acts.filter((a) => a.type === k && a.date >= last && a.date < addDays(last, 7)).length < n);
+    if (missed && daysBetween(weekStart(today), today) <= 2) return 'restart';
+  }
+  return items.length ? 'general' : 'rest';
+}
+
+function quoteCard(acts) {
+  const p = profile();
+  const prefs = store.getPrefs();
+  const today = todayISO();
+  if (p.quotesOff || prefs.quoteHidden === today) return '';
+  const shift = prefs.quoteShift?.day === today ? prefs.quoteShift.n : 0;
+  const q = pickQuote({ situation: quoteSituation(acts), own: parseOwnQuotes(p.ownQuotes), shift });
+  return `<article class="quote-card" aria-label="Tageszitat">
+    <span class="q-mark" aria-hidden="true">“</span>
+    <button class="q-close" data-action="quote-hide" aria-label="Zitat für heute ausblenden" title="Für heute ausblenden">${icon('close', 16)}</button>
+    <p class="q-ctx">${esc(q.label)}</p>
+    <blockquote>«${esc(q.t)}»</blockquote>
+    <div class="q-foot"><span>${esc(q.a || 'Eigenes Zitat')}</span><button class="q-next" data-action="quote-next">${icon('refresh', 13)} anderes</button></div>
+  </article>`;
+}
+
+function quotesSettingsCard(p) {
+  return `<article class="card">
+    <header class="card-head"><h2>💬 Tageszitat</h2></header>
+    <form id="quotes-form" class="form">
+      <label class="switch"><input type="checkbox" name="on" ${p.quotesOff ? '' : 'checked'}><span></span>Tageszitat auf «Heute» anzeigen</label>
+      <label class="field"><span>Eigene Zitate <em>eines pro Zeile, «Text — Autor»</em></span>
+        <textarea name="own" rows="4" placeholder="z.B. Text des Zitats — Name">${esc(p.ownQuotes || '')}</textarea></label>
+      <p class="muted small">Eigene Zitate kommen zusätzlich zur Sammlung (Kipchoge, Goggins, Prefontaine u.a.) – ausser an Ruhetagen. Die deutschen Fassungen der Sammlung sind Übersetzungen. Mit × blendest du das Zitat nur für heute aus.</p>
+      <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button></div>
+    </form>
+  </article>`;
+}
+
 // ── own readiness ("App-Bereitschaft") ──
 const readinessWeights = () => ({ ...DEFAULT_WEIGHTS, ...(profile().readinessWeights || {}) });
 function appReadiness(day = todayISO(), acts = activities()) {
@@ -527,6 +581,16 @@ function appReadiness(day = todayISO(), acts = activities()) {
   return computeReadiness({ day, byDate, checkins: checkins(), acts, weights: readinessWeights() });
 }
 const readyColor = (v) => (v >= 70 ? 'var(--good)' : v >= 50 ? 'var(--s-run)' : v >= 30 ? 'var(--warn)' : 'var(--bad)');
+
+/** Collapsed readiness: just the number. Tap to expand again. */
+function readyCompact(score, level, title, color) {
+  return `<button class="card ready-compact" data-action="ready-toggle" aria-expanded="false" aria-label="${esc(title)} ${score}, ${esc(level)} – Details anzeigen">
+    <span class="rc-num" style="--c:${color}">${score}</span>
+    <span class="rc-text"><span class="eyebrow">${esc(title)}</span><strong>${esc(level)}</strong></span>
+    ${icon('chevron', 18)}
+  </button>`;
+}
+const readyToggleBtn = () => `<button class="icon-btn sm rd-toggle" data-action="ready-toggle" aria-expanded="true" aria-label="Einklappen – nur die Zahl zeigen" title="Einklappen">${icon('chevron', 16)}</button>`;
 
 function appReadinessCard(acts) {
   const r = appReadiness(todayISO(), acts);
@@ -536,8 +600,10 @@ function appReadinessCard(acts) {
     if (!healthDays().length && !Object.keys(checkins()).length) return '';
     return `<article class="card app-ready"><p class="eyebrow">Bereitschaft (App)</p><p class="muted small">Noch zu wenig Daten für heute. Es braucht mindestens Check-in, HRV oder Schlaf und gut die Hälfte der Faktoren. Fehlt: ${esc(r.missing.join(', '))}.</p></article>`;
   }
+  if (store.getPrefs().readyCompact) return readyCompact(r.score, r.level, 'Bereitschaft', readyColor(r.score));
   const cal = calibrate({ daily: healthDays(), checkins: checkins(), acts, endDay: todayISO() });
   return `<article class="card app-ready">
+    ${readyToggleBtn()}
     <div class="rd-head">
       ${ring(r.score, { size: 96, color: readyColor(r.score), label: r.level })}
       <div><p class="eyebrow">Bereitschaft · App-Wert</p>
@@ -590,7 +656,9 @@ function readinessCard() {
   const color = r.score >= 75 ? 'var(--good)' : r.score >= 50 ? 'var(--s-run)' : r.score >= 25 ? 'var(--warn)' : 'var(--bad)';
   const factors = READY_FACTORS.filter(([k]) => r.factors?.[k]);
   const stale = r.at && r.at.slice(0, 10) !== todayISO();
+  if (store.getPrefs().readyCompact) return readyCompact(r.score, READY_LEVEL(r.score), 'Garmin Readiness', color);
   return `<article class="card readiness-card">
+    ${readyToggleBtn()}
     <div class="rd-head">
       ${ring(r.score, { size: 96, color, label: READY_LEVEL(r.score) })}
       <div><p class="eyebrow">Garmin Training Readiness${stale ? ` · ${esc(relDay(r.at.slice(0, 10)))}` : ''}</p>
@@ -2377,6 +2445,7 @@ function renderSettings() {
       ${goalsCard(p)}
       ${raceSettingsCard(p)}
       ${remindersCard(p)}
+      ${quotesSettingsCard(p)}
       ${stretchSettingsCard(p)}
       ${nutritionCard(p)}
       ${templatesCard(p)}
@@ -2736,6 +2805,9 @@ function applyTheme() {
   const { theme } = store.getPrefs();
   if (theme === 'system') delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
+  // iPhone status bar follows the active theme
+  const dark = theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name=theme-color]').forEach((m) => m.setAttribute('content', dark ? '#0d0f14' : '#f6f7f9'));
 }
 
 function buildNav() {
@@ -2820,6 +2892,14 @@ const actions = {
   'ci-cancel': () => { state.ciDraft = null; render(); },
   'trend-tab': (el) => { state.trendTab = el.dataset.tab; render(); },
   'ready-calibrate': () => openCalibration(),
+  'quote-hide': () => { store.savePrefs({ quoteHidden: todayISO() }); render(); toast('Zitat für heute ausgeblendet'); },
+  'quote-next': () => {
+    const prefs = store.getPrefs();
+    const n = prefs.quoteShift?.day === todayISO() ? prefs.quoteShift.n + 1 : 1;
+    store.savePrefs({ quoteShift: { day: todayISO(), n } });
+    render();
+  },
+  'ready-toggle': () => { store.savePrefs({ readyCompact: !store.getPrefs().readyCompact }); render(); },
   'ready-apply': (el) => { sheet.close(); saveProfile((p) => ({ ...p, readinessWeights: JSON.parse(el.dataset.weights) }), 'Neue Gewichte übernommen'); },
   'ready-reset': () => { sheet.close(); saveProfile((p) => { const { readinessWeights, ...rest } = p; return rest; }, 'Standard-Gewichte wiederhergestellt'); },
   // limits
@@ -2964,6 +3044,10 @@ const forms = {
     return saveProfile((p) => ({ ...p, race }), 'Wettkampf gespeichert');
   },
   'stretch-form': submitStretch,
+  'quotes-form': (form) => {
+    const fd = new FormData(form);
+    return saveProfile((p) => ({ ...p, quotesOff: fd.get('on') === 'on' ? undefined : true, ownQuotes: fd.get('own').trim() || undefined }), 'Tageszitat gespeichert');
+  },
   'reminder-form': submitReminders,
   'rec-form': (form) => {
     const fd = new FormData(form);
