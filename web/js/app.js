@@ -557,7 +557,7 @@ function quoteCard(acts) {
     <button class="q-close" data-action="quote-hide" aria-label="Zitat für heute ausblenden" title="Für heute ausblenden">${icon('close', 16)}</button>
     <p class="q-ctx">${esc(q.label)}</p>
     <blockquote>«${esc(q.t)}»</blockquote>
-    <div class="q-foot"><span>${esc(q.a || 'Eigenes Zitat')}</span><button class="q-next" data-action="quote-next">${icon('refresh', 13)} anderes</button></div>
+    <div class="q-foot"><span>${esc(q.a || 'Eigenes Zitat')}${q.attr ? ' <em class="q-attr">(zugeschrieben)</em>' : ''}</span><button class="q-next" data-action="quote-next">${icon('refresh', 13)} anderes</button></div>
   </article>`;
 }
 
@@ -568,7 +568,7 @@ function quotesSettingsCard(p) {
       <label class="switch"><input type="checkbox" name="on" ${p.quotesOff ? '' : 'checked'}><span></span>Tageszitat auf «Heute» anzeigen</label>
       <label class="field"><span>Eigene Zitate <em>eines pro Zeile, «Text — Autor»</em></span>
         <textarea name="own" rows="4" placeholder="z.B. Text des Zitats — Name">${esc(p.ownQuotes || '')}</textarea></label>
-      <p class="muted small">Eigene Zitate kommen zusätzlich zur Sammlung (Kipchoge, Goggins, Prefontaine u.a.) – ausser an Ruhetagen. Die deutschen Fassungen der Sammlung sind Übersetzungen. Mit × blendest du das Zitat nur für heute aus.</p>
+      <p class="muted small">Eigene Zitate kommen zusätzlich zur Sammlung (Kipchoge, Goggins, Prefontaine u.a.) – ausser an Ruhetagen. Die deutschen Fassungen der Sammlung sind Übersetzungen; ein Teil stammt aus der Forbes-Liste «Inspirational Quotes». Zitate mit unsicherem Urheber sind als «zugeschrieben» markiert. Mit × blendest du das Zitat nur für heute aus.</p>
       <div class="form-actions"><button type="submit" class="btn btn-primary">${icon('check', 16)}Speichern</button></div>
     </form>
   </article>`;
